@@ -141,14 +141,21 @@ class _RootShellState extends State<RootShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+<<<<<<< HEAD
     // Explicit login overlay (when user taps a gated tab)
+=======
+>>>>>>> 2d61f32908e07ebf82f02077d6ae20b1e4b4fbd8
     if (_showLoginOverlay && !_isAuthenticated) {
       return LoginScreen(
         onContinue: _continueLogin,
         onSkipAsReader: () {
           setState(() {
             _showLoginOverlay = false;
+<<<<<<< HEAD
             _selectedIndex = 1; // Discover only
+=======
+            _selectedIndex = 1;
+>>>>>>> 2d61f32908e07ebf82f02077d6ae20b1e4b4fbd8
           });
           if (_bootstrap == null) _loadBootstrap();
         },
@@ -179,7 +186,10 @@ class _RootShellState extends State<RootShell> {
     }
 
     final pages = <Widget>[
+<<<<<<< HEAD
       // Library — requires auth
+=======
+>>>>>>> 2d61f32908e07ebf82f02077d6ae20b1e4b4fbd8
       _isAuthenticated
           ? LibraryScreen(
               data: _bootstrap!,
@@ -194,7 +204,10 @@ class _RootShellState extends State<RootShell> {
               onBrowse: () => setState(() => _selectedIndex = 1),
             ),
       DiscoverScreen(data: _bootstrap!, apiService: _apiService),
+<<<<<<< HEAD
       // Write — requires auth
+=======
+>>>>>>> 2d61f32908e07ebf82f02077d6ae20b1e4b4fbd8
       _isAuthenticated
           ? WriteScreen(data: _bootstrap!, apiService: _apiService)
           : _AuthGate(
@@ -256,7 +269,10 @@ class _RootShellState extends State<RootShell> {
         indicatorColor: Colors.transparent,
         selectedIndex: _selectedIndex,
         onDestinationSelected: (value) {
+<<<<<<< HEAD
           // Allow Discover always; other tabs prompt sign-in when logged out
+=======
+>>>>>>> 2d61f32908e07ebf82f02077d6ae20b1e4b4fbd8
           if (!_isAuthenticated && value != 1) {
             _requireAuth(afterLoginIndex: value);
             return;
