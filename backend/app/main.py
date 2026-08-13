@@ -1679,7 +1679,7 @@ def get_public_reading_lists(user: dict[str, Any] = Depends(require_user)):
         except Exception:
             pass
         items.append({
-            **dict(row) if not isinstance(row, dict) else row,
+            **(dict(row) if not isinstance(row, dict) else row),
             "cover_path": _normalize_cover_path(_row_get(row, "cover_path")),
             "covers": covers,
         })
