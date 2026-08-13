@@ -485,36 +485,9 @@ class _StoryCard extends StatefulWidget {
 }
 
 class _StoryCardState extends State<_StoryCard> {
-  bool _isFollowing = false;
-
   @override
   void initState() {
     super.initState();
-    _loadFollowState();
-  }
-
-  Future<void> _loadFollowState() async {
-    final authorId = widget.book.authorUserId;
-    if (authorId == null) return;
-    try {
-      final following = await widget.apiService.fetchAuthorFollowing(authorId);
-      if (!mounted) return;
-      setState(() => _isFollowing = following);
-    } catch (_) {}
-  }
-
-  Future<void> _toggleFollow() async {
-    final authorId = widget.book.authorUserId;
-    if (authorId == null) return;
-    try {
-      if (_isFollowing) {
-        await widget.apiService.unfollowAuthor(authorId);
-        setState(() => _isFollowing = false);
-      } else {
-        await widget.apiService.followAuthor(authorId);
-        setState(() => _isFollowing = true);
-      }
-    } catch (_) {}
   }
 
   void _openDetail() {
@@ -934,28 +907,7 @@ class _CategoryTabs extends StatelessWidget {
   }
 }
 
-// Duplicate _StoryCard removed — the stateful _StoryCard above is used now.
-
-class _BookCoverFallback extends StatelessWidget {
-  const _BookCoverFallback({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [color, Color.lerp(color, Colors.black, 0.3) ?? color],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-    );
-  }
-}
-
-class _TabBarDelegate extends SliverPersistentHeaderDelegate {
+class _TabBarDelegate extends [SliverPersistentHeaderDelegate] {
   final Widget child;
 
   _TabBarDelegate({required this.child});
