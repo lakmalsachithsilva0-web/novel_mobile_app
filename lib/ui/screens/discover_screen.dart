@@ -8,6 +8,7 @@ import '../../data/models/app_bootstrap.dart';
 import '../../data/services/api_service.dart';
 
 import 'explore_screen.dart';
+import 'reader_screen.dart';
 import 'story_detail_screen.dart';
 
 part 'discover_widgets.dart';
