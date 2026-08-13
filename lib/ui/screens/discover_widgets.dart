@@ -514,8 +514,6 @@ class _StoryCardState extends State<_StoryCard> {
         : widget.apiService.resolveAssetUrl(widget.book.coverPath);
     final compact = widget.width <= 100;
 
-    // Compact carousel tiles: cover only (matches Inkitt horizontal rows).
-    // Must never use Column here — parent is often 86×120 and overflows easily.
     if (compact) {
       return GestureDetector(
         onTap: _openDetail,
@@ -902,7 +900,7 @@ class _CategoryTabs extends StatelessWidget {
   }
 }
 
-class _TabBarDelegate extends [SliverPersistentHeaderDelegate] {
+class _TabBarDelegate extends SliverPersistentHeaderDelegate {
   final Widget child;
 
   _TabBarDelegate({required this.child});
@@ -925,11 +923,6 @@ class _TabBarDelegate extends [SliverPersistentHeaderDelegate] {
   @override
   bool shouldRebuild(_TabBarDelegate oldDelegate) => false;
 }
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
-
 
 class _GenreBooksScreen extends StatelessWidget {
   const _GenreBooksScreen({
