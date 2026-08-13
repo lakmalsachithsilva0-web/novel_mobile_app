@@ -95,7 +95,9 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
       setState(() {
         _availableTags = items
             .map((e) {
-              return (e['name'] ?? e['tag'] ?? e['label'] ?? '').toString();
+              if (e is Map) {
+                return (e['name'] ?? e['tag'] ?? e['label'] ?? '').toString();
+              }
               return e.toString();
             })
             .where((t) => t.isNotEmpty)
@@ -277,7 +279,7 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
                       widget.apiService.resolveAssetUrl(_coverPath),
                       fit: BoxFit.cover,
                       width: double.infinity,
-                      errorBuilder: (_, _, _) => const Center(
+                      errorBuilder: (_, __, ___) => const Center(
                         child: Icon(Icons.image_outlined, size: 40),
                       ),
                     )
