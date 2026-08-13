@@ -47,7 +47,8 @@ export function loginAdmin(payload) {
 }
 
 export function getAdminSession() {
-  return request("/api/admin/session");
+  // Backend registers POST /api/admin/session (GET returned 405 Method Not Allowed)
+  return request("/api/admin/session", { method: "POST", body: "{}" });
 }
 
 export function getContentVersion() {
