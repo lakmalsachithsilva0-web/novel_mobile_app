@@ -485,11 +485,6 @@ class _StoryCard extends StatefulWidget {
 }
 
 class _StoryCardState extends State<_StoryCard> {
-  @override
-  void initState() {
-    super.initState();
-  }
-
   void _openDetail() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
