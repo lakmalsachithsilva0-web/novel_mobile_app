@@ -32,6 +32,7 @@ import {
   updateWriteScreen,
   uploadImage,
 } from "./api";
+import { AuthorsPage, UsersPage } from "./moderation_pages";
 
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "▦" },
@@ -801,125 +802,6 @@ function NovelsPage({
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function AuthorsPage({ authors, search }) {
-  const q = search.trim().toLowerCase();
-  const list = authors.filter((a) => !q || a.name.toLowerCase().includes(q));
-  return (
-    <div className="layout-with-aside">
-      <div className="panel">
-        <div className="panel-header">
-          <h3>Authors Management</h3>
-          <span className="meta">{list.length} authors (from novels)</span>
-        </div>
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Profile</th>
-                <th>Author Name</th>
-                <th>Total Novels</th>
-                <th>Genre Focus</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((a) => (
-                <tr key={a.name}>
-                  <td>
-                    <div className="row-profile">
-                      {a.cover ? (
-                        <img src={coverUrl(a.cover)} alt="" />
-                      ) : (
-                        <div className="ph avatar-fallback">{a.name[0]}</div>
-                      )}
-                    </div>
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{a.name}</td>
-                  <td>{a.total}</td>
-                  <td>{a.genreFocus}</td>
-                  <td><span className={`badge ${statusBadge(a.status)}`}>{a.status}</span></td>
-                </tr>
-              ))}
-              {list.length === 0 && <tr><td colSpan={5} className="empty">No authors yet — create novels first</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div className="panel">
-        <div className="panel-header"><h3>Top Authors</h3></div>
-        {list
-          .slice()
-          .sort((a, b) => b.total - a.total)
-          .slice(0, 8)
-          .map((a) => (
-            <div className="activity-item" key={a.name}>
-              <div className="avatar-fallback" style={{ width: 28, height: 28 }}>{a.name[0]}</div>
-              <div>
-                <div style={{ fontWeight: 600 }}>{a.name}</div>
-                <div style={{ fontSize: ".75rem", color: "var(--text-muted)" }}>{a.total} novels</div>
-              </div>
-            </div>
-          ))}
-      </div>
-    </div>
-  );
-}
-
-function UsersPage({ profile, supportRequests }) {
-  return (
-    <div className="layout-with-aside">
-      <div className="panel">
-        <div className="panel-header">
-          <h3>Users / Support contacts</h3>
-        </div>
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Issue</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {supportRequests.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.first_name || "—"}</td>
-                  <td>{r.email}</td>
-                  <td>{r.issue || r.subject || "—"}</td>
-                  <td><span className={`badge ${statusBadge(r.status)}`}>{r.status || "open"}</span></td>
-                  <td>{r.created_at || "—"}</td>
-                </tr>
-              ))}
-              {supportRequests.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="empty">
-                    No support requests yet. App default profile: {profile.display_name || "—"} (@{profile.username || "—"})
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div className="panel">
-        <div className="panel-header"><h3>Default profile (DB)</h3></div>
-        <p style={{ fontSize: ".85rem", color: "var(--text-muted)" }}>
-          Following: <strong>{profile.following ?? 0}</strong>
-          <br />
-          Followers: <strong>{profile.followers ?? 0}</strong>
-          <br />
-          Chapters read: <strong>{profile.chapters_read ?? 0}</strong>
-          <br />
-          Karma: <strong>{profile.social_karma ?? 0}</strong>
-        </p>
       </div>
     </div>
   );
