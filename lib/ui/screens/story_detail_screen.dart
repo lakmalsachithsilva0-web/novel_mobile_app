@@ -34,6 +34,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   bool _loadingReviews = true;
   String? _error;
   int _likesCount = 0;
+  bool _liked = false;
+  bool _likeBusy = false;
   List<Map<String, dynamic>> _authorStories = const [];
   List<Map<String, dynamic>> _youMayAlsoLike = const [];
 
@@ -89,6 +91,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         });
       }
 
+
+      try {
+        final likeState = await widget.apiService.fetchBookLike(_book.id);
+        if (mounted) {
+          setState(() {
+            _liked = (likeState['liked'] as bool?) ?? false;
+            final c = (likeState['likes_count'] as num?)?.toInt();
+            if (c != null) _likesCount = c;
+          });
+        }
+      } catch (_) {}
       // More Stories by Author + You May Also Like (loaded above via aid)
       // Related by first tag or genre
       try {
@@ -578,13 +591,41 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   TextButton.icon(
-                    onPressed: () {
-                      setState(() => _likesCount += 1);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Liked')),
-                      );
-                    },
-                    icon: const Icon(Icons.favorite_border, size: 20),
+                    onPressed: _likeBusy
+                        ? null
+                        : () async {
+                            setState(() => _likeBusy = true);
+                            try {
+                              final res = _liked
+                                  ? await widget.apiService.unlikeBook(_book.id)
+                                  : await widget.apiService.likeBook(_book.id);
+                              if (!mounted) return;
+                              setState(() {
+                                _liked = (res['liked'] as bool?) ?? !_liked;
+                                _likesCount = (res['likes_count'] as num?)
+                                        ?.toInt() ??
+                                    _likesCount;
+                              });
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    e.toString().contains('401')
+                                        ? 'Sign in to like stories'
+                                        : 'Could not update like',
+                                  ),
+                                ),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _likeBusy = false);
+                            }
+                          },
+                    icon: Icon(
+                      _liked ? Icons.favorite : Icons.favorite_border,
+                      size: 20,
+                      color: _liked ? Colors.red : null,
+                    ),
                     label: Text(
                       _likesCount > 0 ? '$_likesCount Likes' : 'Likes',
                     ),

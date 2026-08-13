@@ -108,6 +108,18 @@ def _ensure_mysql_extra_tables(connection) -> int:
             """,
         ),
         (
+            "book_likes",
+            """
+            CREATE TABLE IF NOT EXISTS book_likes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                book_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_book_like (user_id, book_id)
+            )
+            """,
+        ),
+        (
             "reading_list_items",
             """
             CREATE TABLE IF NOT EXISTS reading_list_items (

@@ -71,43 +71,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (widget.coverPath.isNotEmpty)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: SizedBox(
-                            width: double.infinity,
-                            height: 200,
-                            child: Image.network(
-                              widget.apiService.resolveAssetUrl(
-                                widget.coverPath,
-                              ),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(20),
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          Color(0xFF667EEA),
-                                          Color(0xFFFF6B9D),
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                    ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.auto_stories_outlined,
-                                        size: 64,
-                                        color: Colors.white54,
-                                      ),
-                                    ),
-                                  ),
-                            ),
-                          ),
-                        ),
-                      if (widget.coverPath.isNotEmpty)
-                        const SizedBox(height: 18),
                       Text(
                         widget.title,
                         style: Theme.of(context).textTheme.headlineSmall

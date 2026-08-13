@@ -73,6 +73,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   void initState() {
     super.initState();
     _chapters = List<Map<String, dynamic>>.from(widget.chapters);
+    _loadLikeState();
     _chapterIndex = widget.initialChapterIndex.clamp(
       0,
       _chapters.isEmpty ? 0 : _chapters.length - 1,
@@ -282,12 +283,44 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     );
   }
 
-  void _toggleLike() {
-    setState(() {
-      _liked = !_liked;
-      _likeCount += _liked ? 1 : -1;
-      if (_likeCount < 0) _likeCount = 0;
-    });
+  Future<void> _loadLikeState() async {
+    final bookId = widget.bookId;
+    if (bookId == null) return;
+    try {
+      final res = await widget.apiService.fetchBookLike(bookId);
+      if (!mounted) return;
+      setState(() {
+        _liked = (res['liked'] as bool?) ?? false;
+        _likeCount = (res['likes_count'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLike() async {
+    final bookId = widget.bookId;
+    if (bookId == null) {
+      setState(() {
+        _liked = !_liked;
+        _likeCount += _liked ? 1 : -1;
+        if (_likeCount < 0) _likeCount = 0;
+      });
+      return;
+    }
+    try {
+      final res = _liked
+          ? await widget.apiService.unlikeBook(bookId)
+          : await widget.apiService.likeBook(bookId);
+      if (!mounted) return;
+      setState(() {
+        _liked = (res['liked'] as bool?) ?? !_liked;
+        _likeCount = (res['likes_count'] as num?)?.toInt() ?? _likeCount;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to like. One like per account.')),
+      );
+    }
   }
 
   @override

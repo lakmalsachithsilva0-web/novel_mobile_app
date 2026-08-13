@@ -1,17 +1,38 @@
-<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useState } from "react";
-=======
-import { useEffect, useState } from "react";
->>>>>>> ec9f441fac712f8103b51fe982ead114380af6cf
 import {
+  API_BASE_URL,
   clearAdminToken,
+  createAchievement,
+  createBook,
+  createCategory,
+  createMenuItem,
+  createNotification,
+  createReadingList,
+  deleteAchievement,
+  deleteBook,
+  deleteCategory,
+  deleteMenuItem,
+  deleteNotification,
+  deleteReadingList,
+  getAdminBootstrap,
+  getAdminSession,
   getAdminToken,
+  getContentVersion,
+  listStoryImages,
   loginAdmin,
   setAdminToken,
-  API_BASE_URL,
+  updateAchievement,
+  updateBook,
+  updateCategory,
+  updateMenuItem,
+  updateNotification,
+  updateProfile,
+  updateReadingList,
+  updateSupportRequest,
+  updateWriteScreen,
+  uploadImage,
 } from "./api";
 
-<<<<<<< HEAD
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "▦" },
   { id: "novels", label: "Novels", icon: "☰" },
@@ -313,49 +334,11 @@ export default function App() {
             value={loginForm.username}
             onChange={(e) => setLoginForm((f) => ({ ...f, username: e.target.value }))}
             autoComplete="username"
-=======
-/**
- * Temporary shell — replace this file with App.jsx from novel_v2_code_updates.zip
- * (NovelHub full dashboard). styles.css is already the new dark theme on GitHub.
- */
-export default function App() {
-  const [token, setToken] = useState(() => getAdminToken());
-  const [form, setForm] = useState({ username: "", password: "" });
-  const [error, setError] = useState("");
-
-  if (!token) {
-    return (
-      <div className="login-page">
-        <form
-          className="login-card"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            try {
-              const res = await loginAdmin(form);
-              setAdminToken(res.token);
-              setToken(res.token);
-            } catch (err) {
-              setError(String(err.message || err));
-            }
-          }}
-        >
-          <h1>NovelHub Admin</h1>
-          <p>
-            Full UI is in the download zip as <code>App.jsx</code>. Copy it to{" "}
-            <code>admin-panel/src/App.jsx</code>, then refresh.
-          </p>
-          {error && <div className="login-error">{error}</div>}
-          <label>Username</label>
-          <input
-            value={form.username}
-            onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
->>>>>>> ec9f441fac712f8103b51fe982ead114380af6cf
             required
           />
           <label>Password</label>
           <input
             type="password"
-<<<<<<< HEAD
             value={loginForm.password}
             onChange={(e) => setLoginForm((f) => ({ ...f, password: e.target.value }))}
             autoComplete="current-password"
@@ -365,14 +348,6 @@ export default function App() {
           <p style={{ marginTop: 14, fontSize: ".75rem" }}>
             Credentials from backend <code>.env</code> (<code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code>)
           </p>
-=======
-            value={form.password}
-            onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-            required
-          />
-          <button type="submit">Login</button>
-          <p style={{ fontSize: ".75rem", color: "var(--text-muted)" }}>API: {API_BASE_URL}</p>
->>>>>>> ec9f441fac712f8103b51fe982ead114380af6cf
         </form>
       </div>
     );
@@ -381,7 +356,6 @@ export default function App() {
   const pageTitle = NAV.find((n) => n.id === page)?.label || "Dashboard";
 
   return (
-<<<<<<< HEAD
     <div className="app-shell">
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
@@ -827,30 +801,10 @@ function NovelsPage({
             </div>
           ))}
         </div>
-=======
-    <div className="login-page">
-      <div className="login-card">
-        <h1>Install full dashboard</h1>
-        <p>
-          You are signed in. Replace <code>src/App.jsx</code> with the NovelHub{" "}
-          <code>App.jsx</code> from <code>novel_v2_code_updates.zip</code>, then
-          hard-refresh this page.
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            clearAdminToken();
-            setToken("");
-          }}
-        >
-          Sign out
-        </button>
->>>>>>> ec9f441fac712f8103b51fe982ead114380af6cf
       </div>
     </div>
   );
 }
-<<<<<<< HEAD
 
 function AuthorsPage({ authors, search }) {
   const q = search.trim().toLowerCase();
@@ -1334,5 +1288,3 @@ function NotifModal({ item, onClose, onSave }) {
     </div>
   );
 }
-=======
->>>>>>> ec9f441fac712f8103b51fe982ead114380af6cf

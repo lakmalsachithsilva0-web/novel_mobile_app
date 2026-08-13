@@ -3,20 +3,22 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/app_bootstrap.dart';
 import '../../data/services/api_service.dart';
-import 'edit_chapter_screen.dart';
 import 'story_detail_screen.dart';
 
+/// Galatea-style profile: cover + overlapping avatar, stats, About/Stories/Wall/Activity/Reviews.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
     required this.profile,
     required this.apiService,
     required this.achievements,
+    this.viewingUserId,
   });
 
   final ProfileModel profile;
   final ApiService apiService;
   final List<AchievementGroupModel> achievements;
+  final int? viewingUserId;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -26,51 +28,31 @@ class _ProfileScreenState extends State<ProfileScreen>
     with SingleTickerProviderStateMixin {
   final ImagePicker _imagePicker = ImagePicker();
   late TabController _tabController;
-  late Future<List<Map<String, dynamic>>> _storiesFuture;
-  late Future<List<Map<String, dynamic>>> _wallFuture;
-  late Future<List<Map<String, dynamic>>> _activityFuture;
+
   Map<String, dynamic>? _userProfile;
-  bool _isSavingProfile = false;
+  bool _loadingProfile = true;
   bool _isFollowing = false;
-  int? _followerCount;
-  List<LibraryEntryModel> _currentReads = const [];
-  List<Map<String, dynamic>> _myReviews = const [];
+  bool _isOwnProfile = true;
+
+  List<Map<String, dynamic>> _stories = const [];
+  List<Map<String, dynamic>> _wall = const [];
+  List<Map<String, dynamic>> _activity = const [];
+  List<Map<String, dynamic>> _reviews = const [];
+  List<Map<String, dynamic>> _readingLists = const [];
+  String _storyQuery = '';
+  String _storySort = 'Recently Updated';
+  String _storyFilter = 'All stories';
+
+  static const Color brand = Color(0xFF00A88E);
+  static const Color muted = Color(0xFF8A8F98);
+  static const Color cardBg = Color(0xFFF7F8FA);
+  static const Color border = Color(0xFFE8EAED);
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
-    _storiesFuture = widget.apiService.fetchWriterStories();
-    _wallFuture = widget.apiService.fetchChatMessages();
-    _activityFuture = widget.apiService.fetchNotifications();
-    _loadUserProfile();
-    _loadReadingAndReviews();
-  }
-
-  Future<void> _loadReadingAndReviews() async {
-    try {
-      final entries = await widget.apiService.fetchLibraryEntries();
-      final reviews = await widget.apiService.fetchMyReviews();
-      if (!mounted) return;
-      final parsed = <LibraryEntryModel>[];
-      for (final row in entries) {
-        try {
-          parsed.add(LibraryEntryModel.fromMap(row));
-        } catch (_) {}
-      }
-      setState(() {
-        _currentReads = parsed
-            .where((e) {
-              final s = e.readingStatus.toLowerCase().trim();
-              return s != 'completed' &&
-                  s != 'complete' &&
-                  s != 'finished' &&
-                  s != 'done';
-            })
-            .toList();
-        _myReviews = reviews;
-      });
-    } catch (_) {}
+    _loadAll();
   }
 
   @override
@@ -79,330 +61,342 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
-  Future<Map<String, dynamic>> _loadUserProfile() async {
-    final userProfile = await widget.apiService.fetchMe();
-    if (!mounted) {
-      return userProfile;
-    }
-    setState(() {
-      _userProfile = userProfile;
-    });
-    // If viewing another user's profile, initialize follow state and follower count
-    final viewingId = widget.profile.id;
-    final currentUserId = (_userProfile?['id'] as int?);
-    if (viewingId != null &&
-        currentUserId != null &&
-        viewingId != currentUserId) {
-      // load the public profile for the user being viewed
-      final otherProfile = await widget.apiService.fetchProfile(viewingId);
-      final following = await widget.apiService.fetchAuthorFollowing(viewingId);
-      if (mounted) {
-        setState(() {
-          _userProfile = otherProfile.isNotEmpty ? otherProfile : _userProfile;
-          _isFollowing = following;
-          _followerCount =
-              (otherProfile['followers'] as int?) ?? widget.profile.followers;
-        });
-      }
-    } else {
-      // viewing self
-      _followerCount = widget.profile.followers;
-    }
-    return userProfile;
-  }
+  Future<void> _loadAll() async {
+    setState(() => _loadingProfile = true);
+    try {
+      final me = await widget.apiService.fetchMe();
+      final meId = _asInt(me['id'] ?? me['user_id']);
+      final viewId = widget.viewingUserId;
+      _isOwnProfile = viewId == null || viewId == meId;
 
-  String _valueAsString(Object? value) {
-    return value?.toString() ?? '';
-  }
-
-  Future<void> _showEditProfileSheet() async {
-    final currentProfile = _userProfile;
-    if (currentProfile == null) {
-      return;
-    }
-
-    final displayNameController = TextEditingController(
-      text: _valueAsString(currentProfile['display_name']),
-    );
-    final bioController = TextEditingController(
-      text: _valueAsString(currentProfile['bio']),
-    );
-    String photoUrl = _valueAsString(currentProfile['photo_url']);
-    String coverUrl = _valueAsString(currentProfile['cover_url']);
-    bool uploadingPhoto = false;
-    bool uploadingCover = false;
-
-    Future<void> pickImage(
-      bool isCover,
-      void Function(String) updateUrl,
-      void Function(bool) updateUploading,
-    ) async {
-      final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
-      if (picked == null) {
-        return;
-      }
-      updateUploading(true);
-      try {
-        final bytes = await picked.readAsBytes();
-        final response = await widget.apiService.uploadUserImage(
-          bytes,
-          picked.name,
-        );
-        final uploadedPath = _valueAsString(response['path']);
-        if (uploadedPath.isNotEmpty) {
-          updateUrl(uploadedPath);
+      if (_isOwnProfile) {
+        _userProfile = me;
+      } else {
+        _userProfile = await widget.apiService.fetchProfile(viewId!);
+        try {
+          _isFollowing = await widget.apiService.fetchAuthorFollowing(viewId);
+        } catch (_) {
+          _isFollowing = false;
         }
-      } finally {
-        updateUploading(false);
       }
-    }
 
+      final results = await Future.wait([
+        widget.apiService.fetchWriterStories().catchError((_) => <Map<String, dynamic>>[]),
+        widget.apiService.fetchChatMessages().catchError((_) => <Map<String, dynamic>>[]),
+        widget.apiService.fetchNotifications().catchError((_) => <Map<String, dynamic>>[]),
+        widget.apiService.fetchMyReviews().catchError((_) => <Map<String, dynamic>>[]),
+        widget.apiService.fetchReadingLists().catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        _stories = List<Map<String, dynamic>>.from(results[0] as List);
+        _wall = List<Map<String, dynamic>>.from(results[1] as List);
+        _activity = List<Map<String, dynamic>>.from(results[2] as List);
+        _reviews = List<Map<String, dynamic>>.from(results[3] as List);
+        _readingLists = List<Map<String, dynamic>>.from(results[4] as List);
+        _loadingProfile = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingProfile = false);
+    }
+  }
+
+  String _s(dynamic v) => v == null ? '' : '$v'.trim();
+  int _asInt(dynamic v) {
+    if (v is int) return v;
+    return int.tryParse('$v') ?? 0;
+  }
+
+  String get _displayName {
+    final n = _s(_userProfile?['display_name']);
+    if (n.isNotEmpty) return n;
+    if (widget.profile.displayName.trim().isNotEmpty) {
+      return widget.profile.displayName;
+    }
+    return widget.profile.username;
+  }
+
+  String get _username {
+    final u = _s(_userProfile?['username']);
+    if (u.isNotEmpty) return u.replaceAll('@', '');
+    return widget.profile.username.replaceAll('@', '');
+  }
+
+  String get _bio {
+    final b = _s(_userProfile?['bio']);
+    if (b.isNotEmpty) return b;
+    return 'Just a reader turning pages into worlds.';
+  }
+
+  String get _aboutLong {
+    final a = _s(_userProfile?['about'] ?? _userProfile?['bio']);
+    return a.isNotEmpty
+        ? a
+        : _bio;
+  }
+
+  int get _following =>
+      _asInt(_userProfile?['following'] ?? widget.profile.following);
+  int get _followers =>
+      _asInt(_userProfile?['followers'] ?? widget.profile.followers);
+  int get _chaptersRead =>
+      _asInt(_userProfile?['chapters_read'] ?? widget.profile.chaptersRead);
+  int get _karma =>
+      _asInt(_userProfile?['social_karma'] ?? widget.profile.socialKarma);
+  int get _streak =>
+      _asInt(_userProfile?['day_streak'] ?? widget.profile.dayStreak);
+
+  String get _avatarUrl {
+    final p = _s(_userProfile?['avatar_url'] ?? _userProfile?['photo_url']);
+    if (p.isEmpty) return '';
+    return widget.apiService.resolveAssetUrl(p);
+  }
+
+  String get _coverUrl {
+    final p = _s(_userProfile?['cover_url'] ?? _userProfile?['banner_url']);
+    if (p.isEmpty) return '';
+    return widget.apiService.resolveAssetUrl(p);
+  }
+
+  Future<void> _toggleFollow() async {
+    final id = widget.viewingUserId ?? widget.profile.id;
+    if (id == null || _isOwnProfile) return;
+    try {
+      final dynamic res = _isFollowing
+          ? await widget.apiService.unfollowAuthor(id)
+          : await widget.apiService.followAuthor(id);
+      if (!mounted) return;
+      int? followers;
+      if (res is Map) {
+        followers = (res['followers'] as num?)?.toInt();
+      }
+      setState(() {
+        _isFollowing = !_isFollowing;
+        if (_userProfile != null) {
+          if (followers != null) {
+            _userProfile = {..._userProfile!, 'followers': followers};
+          } else {
+            final cur = _asInt(_userProfile!['followers']);
+            _userProfile = {
+              ..._userProfile!,
+              'followers': _isFollowing ? cur + 1 : (cur > 0 ? cur - 1 : 0),
+            };
+          }
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
+  void _showMoreMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('Share profile', style: TextStyle(color: Color(0xFF2B6CB0))),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              title: const Text('Block user', style: TextStyle(color: Color(0xFF2B6CB0))),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              title: const Text('Report user', style: TextStyle(color: Color(0xFF2B6CB0))),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              title: const Text('Cancel', textAlign: TextAlign.center),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editProfile() async {
+    if (!_isOwnProfile) return;
+    final nameCtrl = TextEditingController(text: _displayName);
+    final bioCtrl = TextEditingController(text: _bio);
+    String photoUrl = _s(_userProfile?['photo_url'] ?? _userProfile?['avatar_url']);
+    String coverUrl = _s(_userProfile?['cover_url']);
+    bool uploading = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 20,
-            right: 20,
-            top: 24,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setModalState) {
-              return SingleChildScrollView(
-                child: Column(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Edit profile',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name',
-                    ),
-                  ),
+                  const Text('Edit profile', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: bioController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'Bio',
-                      hintText: 'Tell readers about yourself…',
-                      alignLabelWithHint: true,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    'Profile photo',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: const Color(0xFFE5E5E5),
-                        backgroundImage: photoUrl.isNotEmpty
-                            ? NetworkImage(
-                                widget.apiService.resolveAssetUrl(photoUrl),
-                              )
-                            : null,
-                        child: photoUrl.isEmpty
-                            ? Text(
-                                displayNameController.text.isNotEmpty
-                                    ? displayNameController.text
-                                          .substring(0, 1)
-                                          .toUpperCase()
-                                    : 'U',
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(color: AppTheme.muted),
-                              )
-                            : null,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            FilledButton(
-                              onPressed: uploadingPhoto
-                                  ? null
-                                  : () async {
-                                      await pickImage(
-                                        false,
-                                        (value) => setModalState(() {
-                                          photoUrl = value;
-                                        }),
-                                        (value) => setModalState(() {
-                                          uploadingPhoto = value;
-                                        }),
-                                      );
-                                    },
-                              child: Text(
-                                uploadingPhoto
-                                    ? 'Uploading…'
-                                    : photoUrl.isEmpty
-                                    ? 'Upload photo'
-                                    : 'Change photo',
-                              ),
-                            ),
-                            if (photoUrl.isNotEmpty)
-                              TextButton(
-                                onPressed: () => setModalState(() {
-                                  photoUrl = '';
-                                }),
-                                child: const Text('Remove photo'),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    'Cover image',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (coverUrl.isNotEmpty)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        widget.apiService.resolveAssetUrl(coverUrl),
-                        width: double.infinity,
-                        height: 120,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  const SizedBox(height: 8),
+                  TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Display name')),
+                  TextField(controller: bioCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Bio')),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
-                        child: FilledButton(
-                          onPressed: uploadingCover
+                        child: OutlinedButton.icon(
+                          onPressed: uploading
                               ? null
                               : () async {
-                                  await pickImage(
-                                    true,
-                                    (value) => setModalState(() {
-                                      coverUrl = value;
-                                    }),
-                                    (value) => setModalState(() {
-                                      uploadingCover = value;
-                                    }),
-                                  );
+                                  final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
+                                  if (picked == null) return;
+                                  setModal(() => uploading = true);
+                                  try {
+                                    final bytes = await picked.readAsBytes();
+                                    final res = await widget.apiService.uploadUserImage(bytes, picked.name);
+                                    final path = (res['path'] ?? res['photo_url'] ?? '').toString();
+                                    if (path.isNotEmpty) setModal(() => photoUrl = path);
+                                  } finally {
+                                    setModal(() => uploading = false);
+                                  }
                                 },
-                          child: Text(
-                            uploadingCover
-                                ? 'Uploading…'
-                                : coverUrl.isEmpty
-                                ? 'Upload cover'
-                                : 'Change cover',
-                          ),
+                          icon: const Icon(Icons.person),
+                          label: Text(uploading ? 'Uploading…' : 'Profile photo'),
                         ),
                       ),
-                      if (coverUrl.isNotEmpty)
-                        TextButton(
-                          onPressed: () => setModalState(() {
-                            coverUrl = '';
-                          }),
-                          child: const Text('Remove'),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: uploading
+                              ? null
+                              : () async {
+                                  final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
+                                  if (picked == null) return;
+                                  setModal(() => uploading = true);
+                                  try {
+                                    final bytes = await picked.readAsBytes();
+                                    final res = await widget.apiService.uploadUserImage(bytes, picked.name);
+                                    final path = (res['path'] ?? res['cover_url'] ?? '').toString();
+                                    if (path.isNotEmpty) setModal(() => coverUrl = path);
+                                  } finally {
+                                    setModal(() => uploading = false);
+                                  }
+                                },
+                          icon: const Icon(Icons.image),
+                          label: const Text('Cover'),
                         ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _isSavingProfile
-                          ? null
-                          : () async {
-                              setState(() {
-                                _isSavingProfile = true;
-                              });
-                              try {
-                                final updatedProfile = await widget.apiService
-                                    .updateMe({
-                                      'display_name': displayNameController.text
-                                          .trim(),
-                                      'photo_url': photoUrl,
-                                      'cover_url': coverUrl,
-                                      'bio': bioController.text.trim(),
-                                    });
-                                if (!mounted) {
-                                  return;
-                                }
-                                // Re-fetch /api/me so cover_url + bio stick after leaving the screen
-                                Map<String, dynamic> refreshed = {
-                                  ...currentProfile,
-                                  ...updatedProfile,
-                                };
-                                try {
-                                  final me = await widget.apiService.fetchMe();
-                                  if (me.isNotEmpty) {
-                                    refreshed = {...refreshed, ...me};
-                                  }
-                                } catch (_) {}
-                                setState(() {
-                                  _userProfile = refreshed;
-                                });
-                                Navigator.of(context).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Profile updated successfully',
-                                    ),
-                                  ),
-                                );
-                              } catch (_) {
-                                if (!mounted) {
-                                  return;
-                                }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Unable to update profile. Please try again.',
-                                    ),
-                                  ),
-                                );
-                              } finally {
-                                if (mounted) {
-                                  setState(() {
-                                    _isSavingProfile = false;
-                                  });
-                                }
-                              }
-                            },
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 14),
-                        child: Text('Save changes'),
-                      ),
-                    ),
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: brand, foregroundColor: Colors.white),
+                    onPressed: () async {
+                      try {
+                        await widget.apiService.updateMe({
+                          'display_name': nameCtrl.text.trim(),
+                          'bio': bioCtrl.text.trim(),
+                          if (photoUrl.isNotEmpty) 'photo_url': photoUrl,
+                          if (coverUrl.isNotEmpty) 'cover_url': coverUrl,
+                        });
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        await _loadAll();
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('$e')));
+                        }
+                      }
+                    },
+                    child: const Text('Save'),
                   ),
-                  const SizedBox(height: 24),
                 ],
               ),
-              );
-            },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> get _filteredStories {
+    var list = List<Map<String, dynamic>>.from(_stories);
+    final q = _storyQuery.toLowerCase();
+    if (q.isNotEmpty) {
+      list = list.where((s) {
+        final title = _s(s['title']).toLowerCase();
+        final desc = _s(s['description']).toLowerCase();
+        return title.contains(q) || desc.contains(q);
+      }).toList();
+    }
+    if (_storyFilter == 'Completed') {
+      list = list.where((s) => _s(s['status_text']).toLowerCase().contains('complete')).toList();
+    } else if (_storyFilter == 'In progress') {
+      list = list.where((s) => !_s(s['status_text']).toLowerCase().contains('complete')).toList();
+    }
+    if (_storySort == 'Name') {
+      list.sort((a, b) => _s(a['title']).compareTo(_s(b['title'])));
+    }
+    return list;
+  }
+
+  void _showStorySortSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text('Sort by', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                ],
+              ),
+              const Text('Sort by', style: TextStyle(fontWeight: FontWeight.w600)),
+              for (final opt in ['Recently Updated', 'Name', 'Last Read'])
+                RadioListTile<String>(
+                  dense: true,
+                  activeColor: brand,
+                  title: Text(opt),
+                  value: opt,
+                  groupValue: _storySort,
+                  onChanged: (v) {
+                    setState(() => _storySort = v!);
+                    Navigator.pop(ctx);
+                  },
+                ),
+              const Text('Filter', style: TextStyle(fontWeight: FontWeight.w600)),
+              for (final opt in ['All stories', 'Completed', 'In progress'])
+                RadioListTile<String>(
+                  dense: true,
+                  activeColor: brand,
+                  title: Text(opt),
+                  value: opt,
+                  groupValue: _storyFilter,
+                  onChanged: (v) {
+                    setState(() => _storyFilter = v!);
+                    Navigator.pop(ctx);
+                  },
+                ),
+            ],
           ),
         );
       },
@@ -411,1096 +405,876 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   Widget build(BuildContext context) {
-    final profileName = _valueAsString(_userProfile?['display_name']).trim();
-    final displayName = profileName.isNotEmpty
-        ? profileName
-        : (widget.profile.displayName.trim().isNotEmpty
-            ? widget.profile.displayName
-            : widget.profile.username);
-    final usernameHandle = widget.profile.username
-        .toLowerCase()
-        .replaceAll(' ', '_')
-        .replaceAll('@', '');
-
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // Gradient Header — fixed overflow by using smaller avatar + tighter spacing
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: const Color(0xFF1A3A52),
-            elevation: 0,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration:
-                    _valueAsString(_userProfile?['cover_url']).isNotEmpty
-                    ? BoxDecoration(
-                        image: DecorationImage(
-                          image: NetworkImage(
-                            widget.apiService.resolveAssetUrl(
-                              _valueAsString(_userProfile?['cover_url']),
-                            ),
-                          ),
-                          fit: BoxFit.cover,
-                          colorFilter: ColorFilter.mode(
-                            Colors.black.withValues(alpha: 0.35),
-                            BlendMode.darken,
-                          ),
-                        ),
-                      )
-                    : const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF1A3A52), Color(0xFF2D5A7A)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+      backgroundColor: Colors.white,
+      body: _loadingProfile
+          ? const Center(child: CircularProgressIndicator(color: brand))
+          : NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) {
+                return [
+                  SliverAppBar(
+                    expandedHeight: 168,
+                    pinned: true,
+                    backgroundColor: const Color(0xFF1A2030),
+                    leading: IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, color: Colors.white),
+                        onPressed: _showMoreMenu,
                       ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircleAvatar(
-                          radius: 36,
-                          backgroundColor: Colors.white.withValues(alpha: 0.2),
-                          backgroundImage:
-                              _valueAsString(
-                                _userProfile?['photo_url'],
-                              ).isNotEmpty
-                              ? NetworkImage(
-                                  widget.apiService.resolveAssetUrl(
-                                    _valueAsString(_userProfile?['photo_url']),
-                                  ),
-                                )
-                              : null,
-                          child:
-                              _valueAsString(_userProfile?['photo_url']).isEmpty
-                              ? Text(
-                                  displayName.isNotEmpty
-                                      ? displayName
-                                            .substring(0, 1)
-                                            .toUpperCase()
-                                      : 'U',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineMedium
-                                      ?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '@$usernameHandle',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(color: Colors.white70),
+                    ],
+                    flexibleSpace: FlexibleSpaceBar(
+                      background: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_coverUrl.isNotEmpty)
+                            Image.network(
+                              _coverUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _defaultCover(),
+                            )
+                          else
+                            _defaultCover(),
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.15),
+                                  Colors.black.withValues(alpha: 0.45),
+                                ],
                               ),
                             ),
-                            if (widget.profile.id == null ||
-                                widget.profile.id ==
-                                    (_userProfile?['id'] as int?))
-                              OutlinedButton.icon(
-                                onPressed: _showEditProfileSheet,
-                                icon: const Icon(
-                                  Icons.edit,
-                                  size: 16,
-                                  color: Colors.white,
-                                ),
-                                label: const Text(
-                                  'Edit',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                  ),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 8,
-                                    horizontal: 12,
-                                  ),
-                                ),
-                              )
-                            else
-                              SizedBox(
-                                height: 36,
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    final authorId = widget.profile.id!;
-                                    try {
-                                      if (_isFollowing) {
-                                        await widget.apiService.unfollowAuthor(
-                                          authorId,
-                                        );
-                                        setState(() {
-                                          _isFollowing = false;
-                                          _followerCount =
-                                              (_followerCount ??
-                                                  widget.profile.followers) -
-                                              1;
-                                        });
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Unfollowed author'),
-                                          ),
-                                        );
-                                      } else {
-                                        await widget.apiService.followAuthor(
-                                          authorId,
-                                        );
-                                        setState(() {
-                                          _isFollowing = true;
-                                          _followerCount =
-                                              (_followerCount ??
-                                                  widget.profile.followers) +
-                                              1;
-                                        });
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Now following'),
-                                          ),
-                                        );
-                                      }
-                                    } catch (e) {
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(content: Text('$e')),
-                                        );
-                                      }
-                                    }
-                                  },
-                                  icon: Icon(
-                                    _isFollowing
-                                        ? Icons.person_remove_alt_1_outlined
-                                        : Icons.person_add_alt_1_outlined,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                  label: Text(
-                                    _isFollowing ? 'Unfollow' : 'Follow',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(
-                                      color: Colors.white.withValues(alpha: 0.7),
-                                    ),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 8,
-                                      horizontal: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
-          ),
-
-          // Stats Row
-          SliverToBoxAdapter(
-            child: Container(
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  SliverToBoxAdapter(child: _buildIdentityBlock()),
+                  // Sticky tabs
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _TabBarDelegate(
+                      TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        labelColor: brand,
+                        unselectedLabelColor: muted,
+                        indicatorColor: brand,
+                        indicatorWeight: 2.5,
+                        labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                        tabs: const [
+                          Tab(text: 'About'),
+                          Tab(text: 'Stories'),
+                          Tab(text: 'Wall'),
+                          Tab(text: 'Activity'),
+                          Tab(text: 'Reviews'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ];
+              },
+              body: TabBarView(
+                controller: _tabController,
                 children: [
-                  _StatCard(
-                    label: 'Following',
-                    value: widget.profile.following.toString(),
-                  ),
-                  _StatCard(
-                    label: 'Followers',
-                    value: widget.profile.followers.toString(),
-                  ),
-                  _StatCard(
-                    label: 'Blocked',
-                    value: widget.profile.blocked.toString(),
-                  ),
+                  _buildAboutTab(),
+                  _buildStoriesTab(),
+                  _buildWallTab(),
+                  _buildActivityTab(),
+                  _buildReviewsTab(),
                 ],
               ),
             ),
-          ),
+    );
+  }
 
-          // Tabs — wrapped in Material to fix "No Material widget found"
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _TabHeaderDelegate(
-              child: Material(
-                color: Colors.white,
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: AppTheme.brand,
-                  unselectedLabelColor: AppTheme.muted,
-                  indicatorColor: AppTheme.brand,
-                  tabs: const [
-                    Tab(text: 'About'),
-                    Tab(text: 'Stories'),
-                    Tab(text: 'Wall'),
-                    Tab(text: 'Activity'),
-                    Tab(text: 'Reviews'),
-                  ],
-                ),
-              ),
-            ),
-          ),
+  Widget _defaultCover() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF1A2030), Color(0xFF2D3A4A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: const Center(
+        child: Icon(Icons.person, size: 64, color: Colors.white24),
+      ),
+    );
+  }
 
-          // Tab Content
-          SliverFillRemaining(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _AboutTab(
-                  profile: widget.profile,
-                  apiService: widget.apiService,
-                  bio: _valueAsString(_userProfile?['bio']),
-                  currentReads: _currentReads,
-                ),
-                _StoriesTab(
-                  storiesFuture: _storiesFuture,
-                  apiService: widget.apiService,
-                ),
-                _WallTab(messagesFuture: _wallFuture),
-                _ActivityTab(notificationsFuture: _activityFuture),
-                _ReviewsTab(
-                  reviews: _myReviews,
-                  apiService: widget.apiService,
+  /// Avatar overlaps cover; name / bio / stats / Follow sit on white below.
+  Widget _buildIdentityBlock() {
+    return Transform.translate(
+      offset: const Offset(0, -36),
+      child: Column(
+        children: [
+          // Avatar centered, overlapping cover
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
+            child: CircleAvatar(
+              radius: 44,
+              backgroundColor: const Color(0xFFE2E8F0),
+              backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+              child: _avatarUrl.isEmpty
+                  ? Text(
+                      _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?',
+                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: muted),
+                    )
+                  : null,
+            ),
           ),
+          const SizedBox(height: 10),
+          // Name + verified
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _displayName,
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A)),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                width: 18,
+                height: 18,
+                decoration: const BoxDecoration(color: brand, shape: BoxShape.circle),
+                child: const Icon(Icons.check, size: 12, color: Colors.white),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text('@$_username', style: const TextStyle(fontSize: 14, color: muted)),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Text(
+              _bio,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, height: 1.35, color: Color(0xFF4A4A4A)),
+            ),
+          ),
+          const SizedBox(height: 14),
+          // Following | Followers
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _countCol('$_following', 'Following'),
+              Container(width: 1, height: 28, color: border, margin: const EdgeInsets.symmetric(horizontal: 20)),
+              _countCol('$_followers', 'Followers'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Follow / Edit button
+          OutlinedButton(
+            onPressed: _isOwnProfile ? _editProfile : _toggleFollow,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF1A1A1A),
+              side: const BorderSide(color: Color(0xFFD0D5DD)),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            ),
+            child: Text(
+              _isOwnProfile ? 'Edit profile' : (_isFollowing ? 'Following' : 'Follow'),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
-}
 
-class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _countCol(String value, String label) {
     return Column(
       children: [
-        Text(
-          value,
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.brand,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: AppTheme.muted),
-        ),
+        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+        Text(label, style: const TextStyle(fontSize: 12, color: muted)),
       ],
     );
   }
-}
 
-class _AboutTab extends StatelessWidget {
-  const _AboutTab({
-    required this.profile,
-    required this.apiService,
-    this.bio = '',
-    this.currentReads = const [],
-  });
+  // ─── About ───────────────────────────────────────────────
+  Widget _buildAboutTab() {
+    final lists = _readingLists.isNotEmpty
+        ? _readingLists
+        : widget.profile.readingLists
+            .map((l) => {
+                  'name': l.name,
+                  'story_count': l.storyCount,
+                  'cover_path': l.coverPath,
+                })
+            .toList();
 
-  final ProfileModel profile;
-  final ApiService apiService;
-  final String bio;
-  final List<LibraryEntryModel> currentReads;
-
-  @override
-  Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
       children: [
-        Text(
-          'Currently Reading',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (currentReads.isEmpty)
-          Text(
-            'No books in progress — tap Read Now on a story to start.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppTheme.muted,
+        // Stat cards — 2 top + 1 full width (video layout)
+        Row(
+          children: [
+            Expanded(
+              child: _statCard(
+                icon: Icons.menu_book_rounded,
+                iconColor: const Color(0xFF9B59B6),
+                label: 'CHAPTERS READ',
+                value: '$_chaptersRead',
+              ),
             ),
-          )
+            const SizedBox(width: 10),
+            Expanded(
+              child: _statCard(
+                icon: Icons.campaign_outlined,
+                iconColor: brand,
+                label: 'SOCIAL KARMA',
+                value: '$_karma',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _statCard(
+          icon: Icons.blur_on,
+          iconColor: const Color(0xFF5B9BD5),
+          label: 'DAY READING STREAK',
+          value: '$_streak',
+        ),
+        const SizedBox(height: 22),
+        Text(
+          'About $_displayName',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _aboutLong,
+          style: const TextStyle(fontSize: 14, height: 1.45, color: Color(0xFF3A3A3A)),
+        ),
+        const SizedBox(height: 24),
+        const Text('Reading Lists', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Public Reading Lists', style: TextStyle(fontSize: 12, color: muted)),
+        const SizedBox(height: 12),
+        if (lists.isEmpty)
+          const Text('No public reading lists yet.', style: TextStyle(color: muted))
         else
           SizedBox(
             height: 150,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: currentReads.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final e = currentReads[index];
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => StoryDetailScreen(
-                          apiService: apiService,
-                          book: BookDetailModel(
-                            id: e.book.id,
-                            title: e.book.title,
-                            author: e.book.author,
-                            description: e.book.description,
-                            statusText: e.book.statusText,
-                            rating: e.book.rating,
-                            genre: e.book.primaryGenre,
-                            cta: e.book.cta,
-                            coverPath: e.book.coverPath,
-                            authorUserId: e.book.authorUserId,
-                          ),
+              itemCount: lists.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              itemBuilder: (context, i) {
+                final list = lists[i];
+                final name = _s(list['name'] ?? list['title']);
+                final count = _asInt(list['story_count'] ?? list['count']);
+                final cover = _s(list['cover_path']);
+                return SizedBox(
+                  width: 130,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: cover.isNotEmpty
+                              ? Image.network(
+                                  widget.apiService.resolveAssetUrl(cover),
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                  errorBuilder: (_, __, ___) => Container(color: cardBg),
+                                )
+                              : Container(
+                                  color: cardBg,
+                                  child: const Icon(Icons.collections_bookmark_outlined, color: muted),
+                                ),
                         ),
                       ),
-                    );
-                  },
-                  child: SizedBox(
-                    width: 90,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: e.book.coverPath.isNotEmpty
-                                ? Image.network(
-                                    apiService.resolveAssetUrl(e.book.coverPath),
-                                    width: 90,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        const ColoredBox(color: Color(0xFFE4E4E4)),
-                                  )
-                                : const ColoredBox(color: Color(0xFFE4E4E4)),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          e.book.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
+                      const SizedBox(height: 6),
+                      Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      Text('$count Stories', style: const TextStyle(fontSize: 11, color: muted)),
+                    ],
                   ),
                 );
               },
             ),
           ),
-        const SizedBox(height: 28),
-        Text(
-          'Stats',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _StatsPanel(
-              icon: Icons.menu_book_outlined,
-              label: 'Chapters Read',
-              value: profile.chaptersRead.toString(),
-              color: const Color(0xFF667EEA),
-            ),
-            _StatsPanel(
-              icon: Icons.favorite_outline,
-              label: 'Social Karma',
-              value: profile.socialKarma.toString(),
-              color: const Color(0xFFFF6B9D),
-            ),
-            _StatsPanel(
-              icon: Icons.local_fire_department_outlined,
-              label: 'Day Streak',
-              value: profile.dayStreak.toString(),
-              color: const Color(0xFFFFB84D),
-            ),
-          ],
-        ),
-        const SizedBox(height: 32),
-        Text(
-          'Reading Lists',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (profile.readingLists.isEmpty)
-          Text(
-            'No reading lists yet',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
-          )
-        else
-          SizedBox(
-            height: 160,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: profile.readingLists.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
-              itemBuilder: (context, index) => _ReadingListPreview(
-                list: profile.readingLists[index],
-                apiService: apiService,
-              ),
-            ),
-          ),
-        const SizedBox(height: 32),
-        Text(
-          'About Me',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        const SizedBox(height: 24),
+        const Text('Achievements', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFE5E5E5)),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            bio.trim().isEmpty ? 'No bio added yet' : bio.trim(),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              height: 1.6,
-              color: const Color(0xFF555555),
-            ),
-          ),
-        ),
+        _buildAchievementsGrid(),
       ],
     );
   }
-}
 
-class _StatsPanel extends StatelessWidget {
-  const _StatsPanel({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFFE5E5E5)),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontSize: 11,
-                color: AppTheme.muted,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+  Widget _statCard({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2)),
+        ],
       ),
-    );
-  }
-}
-
-class _ReadingListPreview extends StatelessWidget {
-  const _ReadingListPreview({required this.list, required this.apiService});
-
-  final ReadingListModel list;
-  final ApiService apiService;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 140,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
+          Icon(icon, color: iconColor, size: 22),
+          const SizedBox(width: 10),
           Expanded(
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: const Color(0xFFF5F5F5),
-              ),
-              child: list.coverPath.isNotEmpty
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.network(
-                        apiService.resolveAssetUrl(list.coverPath),
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const ColoredBox(color: Color(0xFFF5F5F5)),
-                      ),
-                    )
-                  : Icon(
-                      Icons.library_books_outlined,
-                      color: AppTheme.muted.withValues(alpha: 0.3),
-                      size: 48,
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: muted, letterSpacing: 0.3)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            list.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelMedium,
           ),
         ],
       ),
     );
   }
-}
 
-class _StoriesTab extends StatelessWidget {
-  const _StoriesTab({required this.storiesFuture, required this.apiService});
-
-  final Future<List<Map<String, dynamic>>> storiesFuture;
-  final ApiService apiService;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: storiesFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final stories = snapshot.data ?? const <Map<String, dynamic>>[];
-        if (stories.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.auto_stories_outlined,
-                  size: 48,
-                  color: AppTheme.muted.withValues(alpha: 0.3),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No published stories yet',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: stories.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            final story = stories[index];
-            final cover = story['cover_path']?.toString() ?? '';
-            return Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE5E5E5)),
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                onTap: () {
-                  final id = (story['id'] as num?)?.toInt();
-                  if (id == null) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => StoryDetailScreen(
-                        apiService: apiService,
-                        book: BookDetailModel.fromMap(story),
-                      ),
-                    ),
-                  );
-                },
-                trailing: PopupMenuButton<String>(
-                  onSelected: (v) async {
-                    final id = (story['id'] as num?)?.toInt();
-                    if (id == null) return;
-                    if (v == 'read') {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => StoryDetailScreen(
-                            apiService: apiService,
-                            book: BookDetailModel.fromMap(story),
-                          ),
-                        ),
-                      );
-                    } else if (v == 'chapters') {
-                      List<Map<String, dynamic>> chapters = const [];
-                      try {
-                        chapters = await apiService.fetchStoryChapters(id);
-                      } catch (_) {}
-                      if (!context.mounted) return;
-                      final choice = await showModalBottomSheet<Object>(
-                        context: context,
-                        isScrollControlled: true,
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(
-                            top: Radius.circular(16),
-                          ),
-                        ),
-                        builder: (ctx) => SafeArea(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  'Chapters',
-                                  style: Theme.of(ctx)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(height: 8),
-                                if (chapters.isEmpty)
-                                  const Text('No chapters yet'),
-                                for (final c in chapters)
-                                  ListTile(
-                                    title: Text(
-                                      (c['title'] ??
-                                              'Chapter ${(c['chapter_number'] as num?)?.toInt() ?? 0}')
-                                          .toString(),
-                                    ),
-                                    onTap: () => Navigator.pop(ctx, c),
-                                  ),
-                                FilledButton.icon(
-                                  onPressed: () => Navigator.pop(ctx, 'new'),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Add new chapter'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                      if (!context.mounted || choice == null) return;
-                      if (choice == 'new') {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => EditChapterScreen(
-                              apiService: apiService,
-                              storyId: id,
-                              createNew: true,
-                            ),
-                          ),
-                        );
-                      } else if (choice is Map<String, dynamic>) {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => EditChapterScreen(
-                              apiService: apiService,
-                              storyId: id,
-                              chapterId: (choice['id'] as num?)?.toInt(),
-                              chapterNumber:
-                                  (choice['chapter_number'] as num?)?.toInt(),
-                              chapterTitle:
-                                  (choice['title'] ?? 'Chapter').toString(),
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'read', child: Text('Read / view')),
-                    PopupMenuItem(
-                      value: 'chapters',
-                      child: Text('Manage chapters'),
-                    ),
-                  ],
-                ),
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: cover.isNotEmpty
-                      ? Image.network(
-                          apiService.resolveAssetUrl(cover),
-                          width: 64,
-                          height: 64,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const ColoredBox(color: Color(0xFFF5F5F5)),
-                        )
-                      : const SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: ColoredBox(color: Color(0xFFF5F5F5)),
-                        ),
-                ),
-                title: Text(story['title'] as String? ?? 'Untitled story'),
-                subtitle: Text(
-                  [
-                    story['author'] as String? ?? 'Unknown author',
-                    if ((story['status_text'] as String?)?.trim().isNotEmpty ==
-                        true)
-                      (story['status_text'] as String).trim(),
-                  ].join(' · '),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _WallTab extends StatelessWidget {
-  const _WallTab({required this.messagesFuture});
-
-  final Future<List<Map<String, dynamic>>> messagesFuture;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: messagesFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final messages = snapshot.data ?? const <Map<String, dynamic>>[];
-        if (messages.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 48,
-                  color: AppTheme.muted.withValues(alpha: 0.3),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No wall posts yet',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: messages.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final message = messages[index];
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7FAFF),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE5E5E5)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    message['sender'] as String? ?? 'Unknown',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    message['message'] as String? ?? '',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    message['created_at'] as String? ?? '',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: AppTheme.muted),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _ActivityTab extends StatelessWidget {
-  const _ActivityTab({required this.notificationsFuture});
-
-  final Future<List<Map<String, dynamic>>> notificationsFuture;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: notificationsFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final notifications = snapshot.data ?? const <Map<String, dynamic>>[];
-        if (notifications.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.history_outlined,
-                  size: 48,
-                  color: AppTheme.muted.withValues(alpha: 0.3),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No activity yet',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
-                ),
-              ],
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: notifications.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final notification = notifications[index];
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE5E5E5)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    notification['title'] as String? ?? '',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    notification['message'] as String? ?? '',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    notification['created_at'] as String? ?? '',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: AppTheme.muted),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _ReviewsTab extends StatelessWidget {
-  const _ReviewsTab({required this.reviews, required this.apiService});
-
-  final List<Map<String, dynamic>> reviews;
-  final ApiService apiService;
-
-  @override
-  Widget build(BuildContext context) {
-    if (reviews.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.rate_review_outlined,
-              size: 48,
-              color: AppTheme.muted.withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No reviews yet',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppTheme.muted,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Rate a book from its story page to see it here.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppTheme.muted,
-              ),
-            ),
-          ],
+  Widget _buildAchievementsGrid() {
+    final groups = widget.achievements;
+    if (groups.isEmpty) {
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 6,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.15,
+        ),
+        itemBuilder: (_, __) => Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0F1F3),
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
     }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: reviews.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final r = reviews[index];
-        final book = Map<String, dynamic>.from(
-          (r['book'] as Map?) ?? const {},
-        );
-        final title = (book['title'] ?? 'Untitled').toString();
-        final author = (book['author'] ?? '').toString();
-        final cover = (book['cover_path'] ?? '').toString();
-        final rating = r['rating'];
-        final comment = (r['comment'] ?? '').toString();
-        return ListTile(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFFE5E5E5)),
+    final items = <Widget>[];
+    for (final g in groups) {
+      for (final a in g.items) {
+        items.add(
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(a.title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const Spacer(),
+                Text(a.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: muted)),
+              ],
+            ),
           ),
-          onTap: () {
-            final id = (book['id'] as num?)?.toInt();
-            if (id == null) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => StoryDetailScreen(
-                  apiService: apiService,
-                  book: BookDetailModel.fromMap(book),
-                ),
+        );
+      }
+    }
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: 1.15,
+      children: items.take(8).toList(),
+    );
+  }
+
+  // ─── Stories ─────────────────────────────────────────────
+  Widget _buildStoriesTab() {
+    final list = _filteredStories;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            onChanged: (v) => setState(() => _storyQuery = v),
+            decoration: InputDecoration(
+              hintText: 'Search',
+              prefixIcon: const Icon(Icons.search, color: muted),
+              filled: true,
+              fillColor: cardBg,
+              contentPadding: const EdgeInsets.symmetric(vertical: 0),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+                borderSide: BorderSide.none,
               ),
-            );
-          },
-          leading: SizedBox(
-            width: 44,
-            height: 60,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+          child: Row(
+            children: [
+              _filterChip(_storyFilter, onTap: _showStorySortSheet),
+              const SizedBox(width: 8),
+              _filterChip(_storySort, onTap: _showStorySortSheet),
+            ],
+          ),
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? const Center(child: Text('No stories yet', style: TextStyle(color: muted)))
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  itemCount: list.length,
+                  separatorBuilder: (_, __) => const Divider(height: 24),
+                  itemBuilder: (context, i) => _storyRow(list[i]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _filterChip(String label, {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          border: Border.all(color: border),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (label.contains('All') || label.contains('Completed') || label.contains('progress'))
+              const Icon(Icons.filter_list, size: 14, color: muted)
+            else
+              const SizedBox.shrink(),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+            const Icon(Icons.chevron_right, size: 16, color: muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _storyRow(Map<String, dynamic> s) {
+    final title = _s(s['title']);
+    final desc = _s(s['description']);
+    final genre = _s(s['genre'] ?? s['primary_genre']);
+    final rating = s['rating'];
+    final status = _s(s['status_text']);
+    final chapters = _asInt(s['chapter_count'] ?? s['chapters']);
+    final cover = _s(s['cover_path'] ?? s['cover_url']);
+    final completed = status.toLowerCase().contains('complete') || status.toLowerCase().contains('publish');
+
+    return InkWell(
+      onTap: () {
+        final id = _asInt(s['id']);
+        if (id <= 0) return;
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => StoryDetailScreen(
+              apiService: widget.apiService,
+              book: BookDetailModel(
+                id: id,
+                title: title,
+                author: _s(s['author']),
+                description: desc,
+                statusText: status,
+                rating: (rating is num) ? rating.toDouble() : double.tryParse('$rating') ?? 0,
+                genre: genre,
+                cta: _s(s['cta_label']).isEmpty ? 'Read now' : _s(s['cta_label']),
+                coverPath: cover,
+                authorUserId: _asInt(s['author_user_id'] ?? s['user_id']),
+              ),
+            ),
+          ),
+        );
+      },
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
             child: cover.isNotEmpty
                 ? Image.network(
-                    apiService.resolveAssetUrl(cover),
+                    widget.apiService.resolveAssetUrl(cover),
+                    width: 72,
+                    height: 100,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const ColoredBox(color: Color(0xFFE4E4E4)),
+                    errorBuilder: (_, __, ___) => Container(width: 72, height: 100, color: cardBg),
                   )
-                : const ColoredBox(color: Color(0xFFE4E4E4)),
+                : Container(width: 72, height: 100, color: cardBg),
           ),
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    ),
+                    const Icon(Icons.bookmark_border, size: 20, color: muted),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  desc.isEmpty ? 'No description' : desc,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: muted, height: 1.3),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    if (rating != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.star, size: 12, color: Color(0xFFF5A623)),
+                            const SizedBox(width: 2),
+                            Text('$rating', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    if (genre.isNotEmpty)
+                      _tagChip(genre),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(
+                      completed ? Icons.check_circle : Icons.timelapse,
+                      size: 14,
+                      color: completed ? brand : muted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      completed
+                          ? 'Completed${chapters > 0 ? ' · $chapters Chapters' : ''}'
+                          : (chapters > 0 ? '$chapters Chapters' : status),
+                      style: TextStyle(fontSize: 11, color: completed ? brand : muted, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tagChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF4A4A4A))),
+    );
+  }
+
+  // ─── Wall ────────────────────────────────────────────────
+  Widget _buildWallTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        // Composer
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: cardBg,
+              backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+              child: _avatarUrl.isEmpty
+                  ? Text(_displayName.isNotEmpty ? _displayName[0] : '?', style: const TextStyle(color: muted))
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Text(
+                  'Write something to $_username',
+                  style: const TextStyle(color: muted, fontSize: 13),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.image_outlined, color: muted),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (_wall.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(child: Text('No wall posts yet', style: TextStyle(color: muted))),
+          )
+        else
+          ..._wall.map((m) {
+            final name = _s(m['sender_name'] ?? m['username'] ?? m['display_name'] ?? 'User');
+            final body = _s(m['message'] ?? m['body'] ?? m['text']);
+            final when = _s(m['created_at'] ?? m['time'] ?? '');
+            final img = _s(m['image_url'] ?? m['attachment_path'] ?? '');
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: cardBg,
+                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            if (when.isNotEmpty)
+                              Text(when, style: const TextStyle(fontSize: 11, color: muted)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.more_horiz, color: muted, size: 18),
+                    ],
+                  ),
+                  if (body.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(body, style: const TextStyle(fontSize: 14, height: 1.35)),
+                  ],
+                  if (img.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.network(
+                        widget.apiService.resolveAssetUrl(img),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  const Row(
+                    children: [
+                      Icon(Icons.favorite_border, size: 18, color: muted),
+                      SizedBox(width: 16),
+                      Icon(Icons.chat_bubble_outline, size: 18, color: muted),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  // ─── Activity ────────────────────────────────────────────
+  Widget _buildActivityTab() {
+    if (_activity.isEmpty) {
+      return const Center(child: Text('No recent activity', style: TextStyle(color: muted)));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: _activity.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, i) {
+        final n = _activity[i];
+        final title = _s(n['title']);
+        final msg = _s(n['message']);
+        final when = _s(n['created_at'] ?? '');
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: CircleAvatar(
+            radius: 18,
+            backgroundColor: cardBg,
+            backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+            child: _avatarUrl.isEmpty ? const Icon(Icons.notifications_none, size: 18, color: muted) : null,
+          ),
+          title: Text(title.isEmpty ? msg : title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           subtitle: Text(
-            [
-              if (author.isNotEmpty) author,
-              if (rating != null) '★ $rating',
-              if (comment.isNotEmpty) comment,
-            ].join(' · '),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+            [if (msg.isNotEmpty && title.isNotEmpty) msg, if (when.isNotEmpty) when].join(' · '),
+            style: const TextStyle(fontSize: 12, color: muted),
           ),
-          trailing: const Icon(Icons.chevron_right),
         );
       },
     );
   }
+
+  // ─── Reviews ─────────────────────────────────────────────
+  Widget _buildReviewsTab() {
+    if (_reviews.isEmpty) {
+      return const Center(child: Text('No reviews yet', style: TextStyle(color: muted)));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: _reviews.length,
+      separatorBuilder: (_, __) => const Divider(height: 28),
+      itemBuilder: (context, i) {
+        final r = _reviews[i];
+        final bookTitle = _s(r['book_title'] ?? r['title'] ?? 'Story');
+        final author = _s(r['book_author'] ?? r['author'] ?? '');
+        final cover = _s(r['cover_path'] ?? r['book_cover'] ?? '');
+        final stars = _asInt(r['rating'] ?? r['stars'] ?? 0);
+        final plot = _asInt(r['plot_score'] ?? r['plot'] ?? stars);
+        final writing = _asInt(r['writing_score'] ?? r['writing_style'] ?? stars);
+        final grammar = _asInt(r['grammar_score'] ?? r['grammar'] ?? stars);
+        final headline = _s(r['headline'] ?? r['title'] ?? '');
+        final body = _s(r['body'] ?? r['review'] ?? r['text'] ?? '');
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: cover.isNotEmpty
+                      ? Image.network(
+                          widget.apiService.resolveAssetUrl(cover),
+                          width: 40,
+                          height: 56,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(width: 40, height: 56, color: cardBg),
+                        )
+                      : Container(width: 40, height: 56, color: cardBg),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(bookTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      if (author.isNotEmpty)
+                        Text('by $author', style: const TextStyle(fontSize: 12, color: muted)),
+                    ],
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: () {},
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                    minimumSize: const Size(0, 32),
+                    side: const BorderSide(color: border),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: const Text('Read', style: TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.bookmark_border, size: 20, color: muted),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: List.generate(5, (j) {
+                return Icon(
+                  j < stars ? Icons.star : Icons.star_border,
+                  size: 18,
+                  color: const Color(0xFFF5A623),
+                );
+              }),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              children: [
+                _scoreChip('Plot $plot'),
+                _scoreChip('Writing Style $writing'),
+                _scoreChip('Grammar & Punctuation $grammar'),
+              ],
+            ),
+            if (headline.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(headline, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            ],
+            if (body.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(body, style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xFF3A3A3A))),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _scoreChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+    );
+  }
 }
 
-class _TabHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _TabHeaderDelegate({required this.child});
+class _TabBarDelegate extends SliverPersistentHeaderDelegate {
+  _TabBarDelegate(this.tabBar);
+  final TabBar tabBar;
 
-  final Widget child;
-
+  @override
+  double get minExtent => 48;
   @override
   double get maxExtent => 48;
 
   @override
-  double get minExtent => 48;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return child;
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Container(
+      color: Colors.white,
+      child: tabBar,
+    );
   }
 
   @override
-  bool shouldRebuild(_TabHeaderDelegate oldDelegate) => false;
+  bool shouldRebuild(covariant _TabBarDelegate oldDelegate) => false;
 }
