@@ -1107,8 +1107,9 @@ def update_me(
     }
 
 
-@app.post("/api/admin/session")
+@app.api_route("/api/admin/session", methods=["GET", "POST"])
 def admin_session(_: dict[str, Any] = Depends(require_admin)):
+    """Validate admin Bearer token. Accepts GET or POST so clients can use either."""
     return {"ok": True, "username": ADMIN_USERNAME}
 
 
@@ -1657,12 +1658,32 @@ def get_public_reading_lists(user: dict[str, Any] = Depends(require_user)):
         """,
         (user["user_id"],),
     )
-    return {
-        "items": [
-            {**row, "cover_path": _normalize_cover_path(_row_get(row, "cover_path"))}
-            for row in rows
-        ]
-    }
+    items = []
+    for row in rows:
+        lid = _row_get(row, "id")
+        covers = []
+        try:
+            item_rows = fetch_all(
+                """
+                SELECT b.cover_path FROM reading_list_items rli
+                JOIN books b ON b.id = rli.book_id
+                WHERE rli.reading_list_id=%s
+                LIMIT 4
+                """,
+                (lid,),
+            )
+            for ir in item_rows:
+                pth = _normalize_cover_path(_row_get(ir, "cover_path") or "")
+                if pth:
+                    covers.append(pth)
+        except Exception:
+            pass
+        items.append({
+            **dict(row) if not isinstance(row, dict) else row,
+            "cover_path": _normalize_cover_path(_row_get(row, "cover_path")),
+            "covers": covers,
+        })
+    return {"items": items}
 
 
 @app.post("/api/reading-lists")
@@ -3350,6 +3371,7 @@ def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
             """
             SELECT id, email, display_name, photo_url, provider, bio,
                    COALESCE(is_banned, 0) AS is_banned,
+                   COALESCE(is_suspended, 0) AS is_suspended,
                    COALESCE(is_author, 0) AS is_author
             FROM app_users
             ORDER BY id DESC
@@ -3373,6 +3395,7 @@ def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
             "provider": _row_get(row, "provider") or "",
             "bio": _row_get(row, "bio") or "",
             "is_banned": bool(int(_row_get(row, "is_banned") or 0)),
+            "is_suspended": bool(int(_row_get(row, "is_suspended") or 0)),
             "is_author": bool(int(_row_get(row, "is_author") or 0)) or int(story_c[0]["c"] if story_c else 0) > 0,
             "story_count": int(story_c[0]["c"]) if story_c else 0,
             "followers": int(fol_c[0]["c"]) if fol_c else 0,
@@ -3398,6 +3421,46 @@ def admin_unban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
         pass
     return {"ok": True, "is_banned": False}
 
+
+
+@app.post("/api/admin/users/{user_id}/suspend")
+def admin_suspend_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    """Temporarily suspend a user (cannot publish / limited access)."""
+    try:
+        execute_write("ALTER TABLE app_users ADD COLUMN is_suspended INT NOT NULL DEFAULT 0", ())
+    except Exception:
+        pass
+    try:
+        execute_write("ALTER TABLE app_users ADD COLUMN is_banned INT NOT NULL DEFAULT 0", ())
+    except Exception:
+        pass
+    execute_write("UPDATE app_users SET is_suspended=1 WHERE id=%s", (user_id,))
+    return {"ok": True, "is_suspended": True}
+
+
+@app.post("/api/admin/users/{user_id}/unsuspend")
+def admin_unsuspend_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    try:
+        execute_write("UPDATE app_users SET is_suspended=0 WHERE id=%s", (user_id,))
+    except Exception:
+        pass
+    return {"ok": True, "is_suspended": False}
+
+
+@app.post("/api/admin/users/{user_id}/activate")
+def admin_activate_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    """Clear ban + suspend flags — full access restored."""
+    try:
+        execute_write(
+            "UPDATE app_users SET is_banned=0, is_suspended=0 WHERE id=%s",
+            (user_id,),
+        )
+    except Exception:
+        try:
+            execute_write("UPDATE app_users SET is_banned=0 WHERE id=%s", (user_id,))
+        except Exception:
+            pass
+    return {"ok": True, "is_banned": False, "is_suspended": False}
 
 @app.delete("/api/admin/users/{user_id}")
 def admin_delete_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):

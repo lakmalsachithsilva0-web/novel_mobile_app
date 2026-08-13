@@ -7,10 +7,6 @@ import {
   createCategory,
   createMenuItem,
   createNotification,
-  listAdminUsers,
-  banUser,
-  unbanUser,
-  deleteAdminUser,
   createReadingList,
   deleteAchievement,
   deleteBook,
@@ -35,6 +31,13 @@ import {
   updateSupportRequest,
   updateWriteScreen,
   uploadImage,
+  listAdminUsers,
+  banUser,
+  unbanUser,
+  suspendUser,
+  unsuspendUser,
+  activateUser,
+  deleteAdminUser,
 } from "./api";
 
 const NAV = [
@@ -152,7 +155,6 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [books, setBooks] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [users, setUsers] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [writeScreen, setWriteScreen] = useState({});
   const [profile, setProfile] = useState({});
@@ -205,13 +207,6 @@ export default function App() {
       setSupportRequests(asArray(bootstrap.support_requests || bootstrap.support || []));
       setContentVersion(typeof version === "string" ? version : version?.version || "");
       setStoryImages(asArray(images.items || images));
-      try {
-        const u = await listAdminUsers();
-        setUsers(asArray(u.items || u));
-      } catch (ue) {
-        console.warn("users load", ue);
-        setUsers([]);
-      }
     } catch (e) {
       if (String(e.message || e).includes("401") || String(e.message || e).includes("403")) {
         clearAdminToken();
@@ -462,13 +457,7 @@ export default function App() {
           )}
           {page === "authors" && <AuthorsPage authors={authors} search={search} />}
           {page === "users" && (
-            <UsersPage
-              users={users}
-              supportRequests={supportRequests}
-              onBan={async (id) => { await banUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
-              onUnban={async (id) => { await unbanUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
-              onDeleteUser={async (id) => { if (!confirm('Delete user?')) return; await deleteAdminUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
-              onUpdateSupport={async (id, p) => {
+            <UsersPage profile={profile} supportRequests={supportRequests} onUpdateSupport={async (id, p) => {
               await updateSupportRequest(id, p);
               toast("Updated");
               loadAll();
@@ -888,52 +877,198 @@ function AuthorsPage({ authors, search }) {
   );
 }
 
-function UsersPage({ users = [], supportRequests = [], onBan, onUnban, onDeleteUser }) {
-  const list = Array.isArray(users) ? users : [];
+function UsersPage({ profile, supportRequests, onUpdateSupport }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await listAdminUsers();
+      setUsers(asArray(data?.items ?? data));
+    } catch (e) {
+      setError(String(e.message || e));
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const runAction = async (id, action) => {
+    setBusyId(id);
+    setError("");
+    try {
+      if (action === "ban") await banUser(id);
+      else if (action === "unban") await unbanUser(id);
+      else if (action === "suspend") await suspendUser(id);
+      else if (action === "unsuspend") await unsuspendUser(id);
+      else if (action === "activate") await activateUser(id);
+      else if (action === "delete") {
+        if (!window.confirm("Delete this user permanently?")) return;
+        await deleteAdminUser(id);
+      }
+      await load();
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const filtered = users.filter((u) => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return (
+      String(u.display_name || "").toLowerCase().includes(s) ||
+      String(u.email || "").toLowerCase().includes(s) ||
+      String(u.id).includes(s)
+    );
+  });
+
   return (
     <div className="layout-with-aside">
       <div className="panel">
         <div className="panel-header">
-          <h3>Users & Authors</h3>
-          <span className="muted">{list.length} accounts</span>
+          <h3>Users Management</h3>
+          <span className="meta">{filtered.length} users</span>
         </div>
+        <div style={{ padding: "0 12px 12px", display: "flex", gap: 8 }}>
+          <input
+            className="search-input"
+            placeholder="Search name, email, id…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button type="button" className="btn-ghost" onClick={load}>Refresh</button>
+        </div>
+        {error ? <div className="error-banner">{error}</div> : null}
         <div className="table-wrap">
           <table className="data">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
+                <th>User</th>
                 <th>Email</th>
                 <th>Stories</th>
                 <th>Followers</th>
-                <th>Role</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 && (
-                <tr><td colSpan={8} className="muted">No users loaded — ensure backend /api/admin/users is available.</td></tr>
+              {loading && (
+                <tr><td colSpan={6} className="empty">Loading users…</td></tr>
               )}
-              {list.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.id}</td>
-                  <td>{u.display_name || "—"}</td>
-                  <td>{u.email || "—"}</td>
-                  <td>{u.story_count ?? 0}</td>
-                  <td>{u.followers ?? 0}</td>
-                  <td>{u.is_author ? "Author" : "Reader"}</td>
-                  <td>{u.is_banned ? statusBadge("banned") : statusBadge("active")}</td>
-                  <td className="actions">
-                    {u.is_banned ? (
-                      <button className="btn ghost" onClick={() => onUnban?.(u.id)}>Unban</button>
-                    ) : (
-                      <button className="btn danger" onClick={() => onBan?.(u.id)}>Ban</button>
-                    )}
-                    <button className="btn ghost" onClick={() => onDeleteUser?.(u.id)}>Delete</button>
+              {!loading && filtered.map((u) => {
+                const banned = !!u.is_banned;
+                const suspended = !!u.is_suspended;
+                let status = "Active";
+                if (banned) status = "Banned";
+                else if (suspended) status = "Suspended";
+                return (
+                  <tr key={u.id}>
+                    <td>
+                      <div className="row-profile">
+                        {u.photo_url ? (
+                          <img src={coverUrl(u.photo_url)} alt="" />
+                        ) : (
+                          <div className="ph avatar-fallback">
+                            {(u.display_name || u.email || "?")[0]}
+                          </div>
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{u.display_name || "—"}</div>
+                          <div style={{ fontSize: ".72rem", color: "var(--text-muted)" }}>
+                            #{u.id}{u.is_author ? " · Author" : ""}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{u.email || "—"}</td>
+                    <td>{u.story_count ?? 0}</td>
+                    <td>{u.followers ?? 0}</td>
+                    <td>
+                      <span className={`badge ${statusBadge(status)}`}>{status}</span>
+                    </td>
+                    <td>
+                      <div className="action-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {banned ? (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "unban")}
+                          >
+                            Unban
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-danger"
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "ban")}
+                          >
+                            Ban
+                          </button>
+                        )}
+                        {suspended ? (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "unsuspend")}
+                          >
+                            Unsuspend
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={busyId === u.id || banned}
+                            onClick={() => runAction(u.id, "suspend")}
+                          >
+                            Suspend
+                          </button>
+                        )}
+                        {(banned || suspended) && (
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "activate")}
+                          >
+                            Activate
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ color: "#ef4444" }}
+                          disabled={busyId === u.id}
+                          onClick={() => runAction(u.id, "delete")}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty">
+                    No users found. Default profile: {profile?.display_name || "—"}
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -943,17 +1078,35 @@ function UsersPage({ users = [], supportRequests = [], onBan, onUnban, onDeleteU
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Issue</th><th>Status</th></tr>
+              <tr>
+                <th>Name</th>
+                <th>Issue</th>
+                <th>Status</th>
+              </tr>
             </thead>
             <tbody>
-              {(supportRequests || []).map((r) => (
+              {asArray(supportRequests).map((r) => (
                 <tr key={r.id}>
-                  <td>{r.name || r.display_name}</td>
-                  <td>{r.email}</td>
-                  <td>{r.subject || r.message}</td>
-                  <td>{statusBadge(r.status || "open")}</td>
+                  <td>{r.first_name || r.email || "—"}</td>
+                  <td>{r.issue || r.subject || "—"}</td>
+                  <td>
+                    <span className={`badge ${statusBadge(r.status)}`}>{r.status || "open"}</span>
+                    {onUpdateSupport && r.status !== "closed" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        style={{ marginLeft: 8 }}
+                        onClick={() => onUpdateSupport(r.id, { status: "closed" })}
+                      >
+                        Close
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
+              {asArray(supportRequests).length === 0 && (
+                <tr><td colSpan={3} className="empty">No support requests</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -961,7 +1114,6 @@ function UsersPage({ users = [], supportRequests = [], onBan, onUnban, onDeleteU
     </div>
   );
 }
-
 
 function ReportsPage({ books, authors }) {
   const genreData = useMemo(() => {

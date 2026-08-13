@@ -709,7 +709,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           const Text('No public reading lists yet.', style: TextStyle(color: muted))
         else
           SizedBox(
-            height: 150,
+            height: 168,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: lists.length,
@@ -718,32 +718,58 @@ class _ProfileScreenState extends State<ProfileScreen>
                 final list = lists[i];
                 final name = _s(list['name'] ?? list['title']);
                 final count = _asInt(list['story_count'] ?? list['count']);
-                final cover = _s(list['cover_path']);
+                // Galatea-style collage: up to 4 covers in a 2x2 grid
+                final dynamic rawCovers = list['covers'];
+                final covers = <String>[];
+                if (rawCovers is List) {
+                  for (final c in rawCovers) {
+                    final s = _s(c);
+                    if (s.isNotEmpty) covers.add(s);
+                  }
+                }
+                final single = _s(list['cover_path']);
+                if (covers.isEmpty && single.isNotEmpty) covers.add(single);
+                while (covers.length < 4) {
+                  covers.add(''); // placeholders fill the grid
+                }
                 return SizedBox(
-                  width: 130,
+                  width: 128,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: cover.isNotEmpty
-                              ? Image.network(
-                                  widget.apiService.resolveAssetUrl(cover),
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  errorBuilder: (_, __, ___) => Container(color: cardBg),
-                                )
-                              : Container(
-                                  color: cardBg,
-                                  child: const Icon(Icons.collections_bookmark_outlined, color: muted),
-                                ),
+                          borderRadius: BorderRadius.circular(10),
+                          child: GridView.count(
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 2,
+                            crossAxisSpacing: 2,
+                            physics: const NeverScrollableScrollPhysics(),
+                            children: [
+                              for (var j = 0; j < 4; j++)
+                                covers[j].isNotEmpty
+                                    ? Image.network(
+                                        widget.apiService.resolveAssetUrl(covers[j]),
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            Container(color: const Color(0xFFE8EAED)),
+                                      )
+                                    : Container(color: const Color(0xFFF0F1F3)),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                      Text('$count Stories', style: const TextStyle(fontSize: 11, color: muted)),
+                      const SizedBox(height: 8),
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                      Text(
+                        '$count Stories',
+                        style: const TextStyle(fontSize: 11, color: muted),
+                      ),
                     ],
                   ),
                 );
@@ -1051,6 +1077,80 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
       child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF4A4A4A))),
     );
+  }
+
+
+  Future<void> _composeWallPost() async {
+    final targetId = widget.viewingUserId ??
+        _asInt(_userProfile?['id']);
+    final resolvedId = targetId != 0
+        ? targetId
+        : (widget.profile.id ?? 0);
+    if (resolvedId == 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to post on the wall')),
+      );
+      return;
+    }
+    final ctrl = TextEditingController();
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Write something to $_username',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 4,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Say something…',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: brand,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Post'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    try {
+      await widget.apiService.postUserWall(resolvedId, ctrl.text.trim());
+      await _loadAll();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Posted')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
   }
 
   // ─── Wall ────────────────────────────────────────────────

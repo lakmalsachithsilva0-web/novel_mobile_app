@@ -47,7 +47,8 @@ export function loginAdmin(payload) {
 }
 
 export function getAdminSession() {
-  return request("/api/admin/session");
+  // Backend only allows POST (Bearer token in Authorization header).
+  return request("/api/admin/session", { method: "POST", body: "{}" });
 }
 
 export function getContentVersion() {
@@ -252,4 +253,16 @@ export function unbanUser(id) {
 
 export function deleteAdminUser(id) {
   return request(`/api/admin/users/${id}`, { method: "DELETE" });
+}
+
+export function suspendUser(id) {
+  return request(`/api/admin/users/${id}/suspend`, { method: "POST", body: "{}" });
+}
+
+export function unsuspendUser(id) {
+  return request(`/api/admin/users/${id}/unsuspend`, { method: "POST", body: "{}" });
+}
+
+export function activateUser(id) {
+  return request(`/api/admin/users/${id}/activate`, { method: "POST", body: "{}" });
 }
