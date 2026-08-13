@@ -282,7 +282,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(
             icon: Icon(Icons.notifications_none_outlined),
             selectedIcon: Icon(Icons.notifications),
-            label: 'More',
+            label: 'Notifications',
           ),
           NavigationDestination(
             icon: Icon(Icons.menu_rounded),
