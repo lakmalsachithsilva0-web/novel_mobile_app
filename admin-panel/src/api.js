@@ -195,7 +195,7 @@ export function createAchievement(payload) {
   return request("/api/admin/achievements", {
     method: "POST",
     body: JSON.stringify({
-      group_name: payload.group_name ?? "Lifetime Words Published",
+      group_name: payload.group_name ?? "Total Words Published",
       group_order: payload.group_order ?? 2,
       title: payload.title ?? "",
       subtitle: payload.subtitle ?? "",
@@ -253,4 +253,16 @@ export function unbanUser(id) {
 
 export function deleteAdminUser(id) {
   return request(`/api/admin/users/${id}`, { method: "DELETE" });
+}
+
+export function suspendUser(id) {
+  return request(`/api/admin/users/${id}/suspend`, { method: "POST", body: "{}" });
+}
+
+export function unsuspendUser(id) {
+  return request(`/api/admin/users/${id}/unsuspend`, { method: "POST", body: "{}" });
+}
+
+export function activateUser(id) {
+  return request(`/api/admin/users/${id}/activate`, { method: "POST", body: "{}" });
 }
