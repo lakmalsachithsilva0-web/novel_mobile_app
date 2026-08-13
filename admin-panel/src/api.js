@@ -255,8 +255,22 @@ export function deleteAdminUser(id) {
   return request(`/api/admin/users/${id}`, { method: "DELETE" });
 }
 
-export function suspendUser(id) {
-  return request(`/api/admin/users/${id}/suspend`, { method: "POST", body: "{}" });
+export function suspendUser(id, days = 7) {
+  return request(`/api/admin/users/${id}/suspend`, {
+    method: "POST",
+    body: JSON.stringify({ days: Number(days) || 7 }),
+  });
+}
+
+export function restoreUser(id) {
+  return request(`/api/admin/users/${id}/restore`, { method: "POST", body: "{}" });
+}
+
+export function setAuthorActive(id, active = true) {
+  return request(`/api/admin/users/${id}/author-active`, {
+    method: "POST",
+    body: JSON.stringify({ active: !!active }),
+  });
 }
 
 export function unsuspendUser(id) {

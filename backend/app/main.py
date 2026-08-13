@@ -508,6 +508,72 @@ def create_user_token(user_id: int) -> str:
     )
 
 
+
+def _ensure_user_moderation_columns() -> None:
+    """Soft-moderation flags: never hard-delete user rows."""
+    for col_sql in (
+        "ALTER TABLE app_users ADD COLUMN is_banned INT NOT NULL DEFAULT 0",
+        "ALTER TABLE app_users ADD COLUMN is_suspended INT NOT NULL DEFAULT 0",
+        "ALTER TABLE app_users ADD COLUMN is_deleted INT NOT NULL DEFAULT 0",
+        "ALTER TABLE app_users ADD COLUMN suspended_until TEXT NULL",
+        "ALTER TABLE app_users ADD COLUMN is_author_active INT NOT NULL DEFAULT 1",
+    ):
+        try:
+            execute_write(col_sql, ())
+        except Exception:
+            pass
+
+
+
+def _assert_user_can_login(user_id: int) -> None:
+    reason = _user_access_block_reason(user_id)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+def _user_access_block_reason(user_id: int) -> str | None:
+    """Return human-readable block reason, or None if user may log in."""
+    _ensure_user_moderation_columns()
+    rows = fetch_all(
+        """
+        SELECT COALESCE(is_banned,0) AS is_banned,
+               COALESCE(is_suspended,0) AS is_suspended,
+               COALESCE(is_deleted,0) AS is_deleted,
+               suspended_until
+        FROM app_users WHERE id=%s LIMIT 1
+        """,
+        (user_id,),
+    )
+    if not rows:
+        return "Account not found"
+    row = rows[0]
+    if int(_row_get(row, "is_deleted") or 0) == 1:
+        return "This account has been deleted by an administrator"
+    if int(_row_get(row, "is_banned") or 0) == 1:
+        return "This account is banned. Contact support or wait for an unban."
+    if int(_row_get(row, "is_suspended") or 0) == 1:
+        until = _row_get(row, "suspended_until")
+        if until:
+            try:
+                from datetime import datetime, timezone
+                u = str(until).replace("Z", "+00:00")
+                until_dt = datetime.fromisoformat(u)
+                now = datetime.now(timezone.utc)
+                if until_dt.tzinfo is None:
+                    until_dt = until_dt.replace(tzinfo=timezone.utc)
+                if now < until_dt:
+                    return f"Account suspended until {until_dt.isoformat()}"
+                # auto-lift expired suspension
+                execute_write(
+                    "UPDATE app_users SET is_suspended=0, suspended_until=NULL WHERE id=%s",
+                    (user_id,),
+                )
+            except Exception:
+                return "This account is temporarily suspended"
+        else:
+            return "This account is temporarily suspended"
+    return None
+
+
 def require_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing user token")
@@ -555,7 +621,11 @@ def require_user(authorization: str | None = Header(default=None)) -> dict[str, 
     if expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="User token expired")
 
-    return {"user_id": int(sub.split(":", 1)[1])}
+    uid = int(sub.split(":", 1)[1])
+    reason = _user_access_block_reason(uid)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    return {"user_id": uid}
 
 
 def _public_image_path(filename: str) -> str:
@@ -857,6 +927,7 @@ def authenticate_google(payload: GoogleAuthRequest):
             ),
         )
 
+    _assert_user_can_login(user_id)
     return {
         "id": user_id,
         "email": google_user["email"],
@@ -894,6 +965,7 @@ def authenticate_email(payload: EmailAuthRequest):
             (email, display_name),
         )
 
+    _assert_user_can_login(user_id)
     return {
         "id": user_id,
         "email": email,
@@ -928,6 +1000,7 @@ def authenticate_guest(_: GuestAuthRequest):
             (email, display_name),
         )
 
+    _assert_user_can_login(user_id)
     return {
         "id": user_id,
         "email": email,
@@ -3372,7 +3445,10 @@ def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
             SELECT id, email, display_name, photo_url, provider, bio,
                    COALESCE(is_banned, 0) AS is_banned,
                    COALESCE(is_suspended, 0) AS is_suspended,
-                   COALESCE(is_author, 0) AS is_author
+                   COALESCE(is_deleted, 0) AS is_deleted,
+                   suspended_until,
+                   COALESCE(is_author, 0) AS is_author,
+                   COALESCE(is_author_active, 1) AS is_author_active
             FROM app_users
             ORDER BY id DESC
             LIMIT 500
@@ -3396,7 +3472,10 @@ def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
             "bio": _row_get(row, "bio") or "",
             "is_banned": bool(int(_row_get(row, "is_banned") or 0)),
             "is_suspended": bool(int(_row_get(row, "is_suspended") or 0)),
+            "is_deleted": bool(int(_row_get(row, "is_deleted") or 0)),
+            "suspended_until": str(_row_get(row, "suspended_until") or "") or None,
             "is_author": bool(int(_row_get(row, "is_author") or 0)) or int(story_c[0]["c"] if story_c else 0) > 0,
+            "is_author_active": bool(int(_row_get(row, "is_author_active") if _row_get(row, "is_author_active") is not None else 1)),
             "story_count": int(story_c[0]["c"]) if story_c else 0,
             "followers": int(fol_c[0]["c"]) if fol_c else 0,
         })
@@ -3424,26 +3503,34 @@ def admin_unban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
 
 
 @app.post("/api/admin/users/{user_id}/suspend")
-def admin_suspend_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
-    """Temporarily suspend a user (cannot publish / limited access)."""
-    try:
-        execute_write("ALTER TABLE app_users ADD COLUMN is_suspended INT NOT NULL DEFAULT 0", ())
-    except Exception:
-        pass
-    try:
-        execute_write("ALTER TABLE app_users ADD COLUMN is_banned INT NOT NULL DEFAULT 0", ())
-    except Exception:
-        pass
-    execute_write("UPDATE app_users SET is_suspended=1 WHERE id=%s", (user_id,))
-    return {"ok": True, "is_suspended": True}
+def admin_suspend_user(
+    user_id: int,
+    payload: dict[str, Any] | None = None,
+    _: dict[str, Any] = Depends(require_admin),
+):
+    """Suspend for N days (body: {"days": 7}). User cannot log in until suspended_until passes."""
+    _ensure_user_moderation_columns()
+    body = payload or {}
+    days = int(body.get("days") or body.get("suspend_days") or 7)
+    if days < 1:
+        days = 1
+    if days > 3650:
+        days = 3650
+    until = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    execute_write(
+        "UPDATE app_users SET is_suspended=1, suspended_until=%s WHERE id=%s",
+        (until, user_id),
+    )
+    return {"ok": True, "is_suspended": True, "suspended_until": until, "days": days}
 
 
 @app.post("/api/admin/users/{user_id}/unsuspend")
 def admin_unsuspend_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
-    try:
-        execute_write("UPDATE app_users SET is_suspended=0 WHERE id=%s", (user_id,))
-    except Exception:
-        pass
+    _ensure_user_moderation_columns()
+    execute_write(
+        "UPDATE app_users SET is_suspended=0, suspended_until=NULL WHERE id=%s",
+        (user_id,),
+    )
     return {"ok": True, "is_suspended": False}
 
 
@@ -3464,11 +3551,86 @@ def admin_activate_user(user_id: int, _: dict[str, Any] = Depends(require_admin)
 
 @app.delete("/api/admin/users/{user_id}")
 def admin_delete_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
-    execute_write("DELETE FROM author_follows WHERE user_id=%s OR author_id=%s", (user_id, user_id))
+    """Soft-delete: keep row, flag is_deleted so login is permanently blocked until restored."""
+    _ensure_user_moderation_columns()
+    execute_write(
+        "UPDATE app_users SET is_deleted=1, is_banned=1 WHERE id=%s",
+        (user_id,),
+    )
+    return {"ok": True, "is_deleted": True}
+
+
+@app.post("/api/admin/users/{user_id}/restore")
+def admin_restore_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    _ensure_user_moderation_columns()
+    execute_write(
+        "UPDATE app_users SET is_deleted=0, is_banned=0, is_suspended=0, suspended_until=NULL WHERE id=%s",
+        (user_id,),
+    )
+    return {"ok": True, "is_deleted": False}
+
+
+@app.post("/api/admin/users/{user_id}/author-active")
+def admin_set_author_active(
+    user_id: int,
+    payload: dict[str, Any] | None = None,
+    _: dict[str, Any] = Depends(require_admin),
+):
+    _ensure_user_moderation_columns()
+    body = payload or {}
+    active = 1 if body.get("active", True) in (True, 1, "1", "true", "True") else 0
+    execute_write("UPDATE app_users SET is_author_active=%s WHERE id=%s", (active, user_id))
+    return {"ok": True, "is_author_active": bool(active)}
+
+
+@app.get("/api/users/{user_id}/activity")
+def list_user_activity(user_id: int):
+    """Real activity feed: story updates + wall-ish posts from this user."""
+    items: list[dict[str, Any]] = []
     try:
-        execute_write("DELETE FROM book_likes WHERE user_id=%s", (user_id,))
+        books = fetch_all(
+            """
+            SELECT id, title, cover_path, status_text, updated_at, created_at
+            FROM books WHERE user_id=%s
+            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+            LIMIT 30
+            """,
+            (user_id,),
+        )
+        for b in books:
+            when = str(_row_get(b, "updated_at") or _row_get(b, "created_at") or "")
+            items.append({
+                "id": f"book-{_row_get(b, 'id')}",
+                "type": "story_update",
+                "title": f"Updated {_row_get(b, 'title') or 'a story'}",
+                "message": _row_get(b, "status_text") or "",
+                "cover_path": _normalize_cover_path(_row_get(b, "cover_path") or ""),
+                "book_id": _row_get(b, "id"),
+                "created_at": when,
+            })
     except Exception:
         pass
-    execute_write("DELETE FROM app_users WHERE id=%s", (user_id,))
-    return {"ok": True}
+    try:
+        posts = fetch_all(
+            """
+            SELECT id, body, created_at FROM chat_messages
+            WHERE user_id=%s ORDER BY id DESC LIMIT 20
+            """,
+            (user_id,),
+        )
+        for p in posts:
+            items.append({
+                "id": f"wall-{_row_get(p, 'id')}",
+                "type": "wall",
+                "title": "Posted on wall",
+                "message": (_row_get(p, "body") or "")[:200],
+                "cover_path": "",
+                "created_at": str(_row_get(p, "created_at") or ""),
+            })
+    except Exception:
+        pass
+    items.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    return {"items": items[:40]}
+
+
 

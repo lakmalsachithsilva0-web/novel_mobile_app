@@ -109,7 +109,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   : widget.apiService.fetchUserStories(targetId))
               .catchError((_) => <Map<String, dynamic>>[]),
           widget.apiService.fetchUserWall(targetId).catchError((_) => <Map<String, dynamic>>[]),
-          widget.apiService.fetchNotifications().catchError((_) => <Map<String, dynamic>>[]),
+          widget.apiService.fetchUserActivity(targetId).catchError((_) => <Map<String, dynamic>>[]),
           (_isOwnProfile
                   ? widget.apiService.fetchMyReviews()
                   : widget.apiService.fetchUserReviews(targetId))
@@ -377,14 +377,23 @@ class _ProfileScreenState extends State<ProfileScreen>
         return title.contains(q) || desc.contains(q);
       }).toList();
     }
+    bool isCompleted(Map<String, dynamic> s) {
+      final st = _s(s['status_text']).toLowerCase();
+      final flag = s['is_completed'];
+      if (flag == true || flag == 1 || '$flag' == '1') return true;
+      return st.contains('complete') || st.contains('finished') || st == 'published';
+    }
     if (_storyFilter == 'Completed') {
-      list = list.where((s) => _s(s['status_text']).toLowerCase().contains('complete')).toList();
+      list = list.where(isCompleted).toList();
     } else if (_storyFilter == 'In progress') {
-      list = list.where((s) => !_s(s['status_text']).toLowerCase().contains('complete')).toList();
+      list = list.where((s) => !isCompleted(s)).toList();
     }
     if (_storySort == 'Name') {
-      list.sort((a, b) => _s(a['title']).compareTo(_s(b['title'])));
+      list.sort((a, b) => _s(a['title']).toLowerCase().compareTo(_s(b['title']).toLowerCase()));
+    } else if (_storySort == 'Last Read') {
+      list.sort((a, b) => _s(b['updated_at'] ?? b['created_at']).compareTo(_s(a['updated_at'] ?? a['created_at'])));
     }
+    // Recently Updated: keep API order (already newest-first when possible)
     return list;
   }
 
@@ -1202,7 +1211,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             final name = _s(m['sender_name'] ?? m['username'] ?? m['display_name'] ?? 'User');
             final body = _s(m['message'] ?? m['body'] ?? m['text']);
             final when = _s(m['created_at'] ?? m['time'] ?? '');
-            final img = _s(m['image_url'] ?? m['attachment_path'] ?? '');
+            final img = _s(m['image_url'] ?? m['image_path'] ?? m['attachment_path'] ?? '');
             return Padding(
               padding: const EdgeInsets.only(bottom: 18),
               child: Column(
@@ -1265,27 +1274,90 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (_activity.isEmpty) {
       return const Center(child: Text('No recent activity', style: TextStyle(color: muted)));
     }
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       itemCount: _activity.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final n = _activity[i];
         final title = _s(n['title']);
         final msg = _s(n['message']);
         final when = _s(n['created_at'] ?? '');
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(
-            radius: 18,
-            backgroundColor: cardBg,
-            backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-            child: _avatarUrl.isEmpty ? const Icon(Icons.notifications_none, size: 18, color: muted) : null,
-          ),
-          title: Text(title.isEmpty ? msg : title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          subtitle: Text(
-            [if (msg.isNotEmpty && title.isNotEmpty) msg, if (when.isNotEmpty) when].join(' · '),
-            style: const TextStyle(fontSize: 12, color: muted),
+        final cover = _s(n['cover_path']);
+        final bookId = _asInt(n['book_id']);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: cardBg,
+                    backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                    child: _avatarUrl.isEmpty
+                        ? Text(_displayName.isNotEmpty ? _displayName[0] : '?', style: const TextStyle(fontSize: 12))
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title.isEmpty ? _displayName : title,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                        if (when.isNotEmpty)
+                          Text(when, style: const TextStyle(fontSize: 11, color: muted)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.more_horiz, color: muted, size: 18),
+                ],
+              ),
+              if (msg.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(msg, style: const TextStyle(fontSize: 14, height: 1.35)),
+              ],
+              if (cover.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: bookId > 0
+                      ? () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => StoryDetailScreen(
+                                apiService: widget.apiService,
+                                book: BookDetailModel(
+                                  id: bookId,
+                                  title: title,
+                                  author: _displayName,
+                                  description: msg,
+                                  statusText: '',
+                                  rating: 0,
+                                  genre: '',
+                                  cta: 'Read now',
+                                  coverPath: cover,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      : null,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      widget.apiService.resolveAssetUrl(cover),
+                      width: double.infinity,
+                      height: 180,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         );
       },
@@ -1310,7 +1382,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final plot = _asInt(r['plot_score'] ?? r['plot'] ?? stars);
         final writing = _asInt(r['writing_score'] ?? r['writing_style'] ?? stars);
         final grammar = _asInt(r['grammar_score'] ?? r['grammar'] ?? stars);
-        final headline = _s(r['headline'] ?? r['title'] ?? '');
+        final headline = _s(r['headline'] ?? '');
         final body = _s(r['body'] ?? r['comment'] ?? r['review'] ?? r['text'] ?? '');
 
         return Column(
@@ -1342,7 +1414,28 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                 ),
                 OutlinedButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    final bid = _asInt(r['book_id']);
+                    if (bid <= 0) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => StoryDetailScreen(
+                          apiService: widget.apiService,
+                          book: BookDetailModel(
+                            id: bid,
+                            title: bookTitle,
+                            author: author,
+                            description: body,
+                            statusText: '',
+                            rating: stars.toDouble(),
+                            genre: '',
+                            cta: 'Read now',
+                            coverPath: cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
                     minimumSize: const Size(0, 32),

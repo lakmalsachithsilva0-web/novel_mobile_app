@@ -38,6 +38,8 @@ import {
   unsuspendUser,
   activateUser,
   deleteAdminUser,
+  restoreUser,
+  setAuthorActive,
 } from "./api";
 
 const NAV = [
@@ -814,15 +816,64 @@ function NovelsPage({
 }
 
 function AuthorsPage({ authors, search }) {
-  const q = search.trim().toLowerCase();
-  const list = authors.filter((a) => !q || a.name.toLowerCase().includes(q));
+  const [users, setUsers] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const [q, setQ] = useState(search || "");
+
+  const load = useCallback(async () => {
+    try {
+      const data = await listAdminUsers();
+      const all = asArray(data?.items ?? data);
+      setUsers(all.filter((u) => u.is_author || (u.story_count || 0) > 0));
+    } catch (e) {
+      setError(String(e.message || e));
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    setQ(search || "");
+  }, [search]);
+
+  const list = users.filter((u) => {
+    const s = (q || "").trim().toLowerCase();
+    if (!s) return true;
+    return (
+      String(u.display_name || "").toLowerCase().includes(s) ||
+      String(u.email || "").toLowerCase().includes(s)
+    );
+  });
+
+  const act = async (id, action) => {
+    setBusyId(id);
+    setError("");
+    try {
+      if (action === "active") await setAuthorActive(id, true);
+      else if (action === "inactive") await setAuthorActive(id, false);
+      else if (action === "delete") {
+        if (!window.confirm("Soft-delete this author account?")) return;
+        await deleteAdminUser(id);
+      }
+      await load();
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="layout-with-aside">
       <div className="panel">
         <div className="panel-header">
           <h3>Authors Management</h3>
-          <span className="meta">{list.length} authors (from novels)</span>
+          <span className="meta">{list.length} authors</span>
         </div>
+        {error ? <div className="error-banner">{error}</div> : null}
         <div className="table-wrap">
           <table className="data">
             <thead>
@@ -830,29 +881,82 @@ function AuthorsPage({ authors, search }) {
                 <th>Profile</th>
                 <th>Author Name</th>
                 <th>Total Novels</th>
-                <th>Genre Focus</th>
+                <th>Followers</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {list.map((a) => (
-                <tr key={a.name}>
-                  <td>
-                    <div className="row-profile">
-                      {a.cover ? (
-                        <img src={coverUrl(a.cover)} alt="" />
-                      ) : (
-                        <div className="ph avatar-fallback">{a.name[0]}</div>
-                      )}
-                    </div>
+              {list.map((a) => {
+                const active = a.is_author_active !== false && !a.is_deleted && !a.is_banned;
+                const status = a.is_deleted
+                  ? "Deleted"
+                  : a.is_banned
+                    ? "Banned"
+                    : a.is_author_active === false
+                      ? "Inactive"
+                      : "Active";
+                return (
+                  <tr key={a.id}>
+                    <td>
+                      <div className="row-profile">
+                        {a.photo_url ? (
+                          <img src={coverUrl(a.photo_url)} alt="" />
+                        ) : (
+                          <div className="ph avatar-fallback">
+                            {(a.display_name || "?")[0]}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{a.display_name || "—"}</td>
+                    <td>{a.story_count ?? 0}</td>
+                    <td>{a.followers ?? 0}</td>
+                    <td>
+                      <span className={`badge ${statusBadge(status)}`}>{status}</span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {active ? (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={busyId === a.id}
+                            onClick={() => act(a.id, "inactive")}
+                          >
+                            Inactive
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={busyId === a.id || a.is_deleted}
+                            onClick={() => act(a.id, "active")}
+                          >
+                            Active
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ color: "#ef4444" }}
+                          disabled={busyId === a.id || a.is_deleted}
+                          onClick={() => act(a.id, "delete")}
+                        >
+                          Soft delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {list.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty">
+                    No authors yet — users with published novels appear here
                   </td>
-                  <td style={{ fontWeight: 600 }}>{a.name}</td>
-                  <td>{a.total}</td>
-                  <td>{a.genreFocus}</td>
-                  <td><span className={`badge ${statusBadge(a.status)}`}>{a.status}</span></td>
                 </tr>
-              ))}
-              {list.length === 0 && <tr><td colSpan={5} className="empty">No authors yet — create novels first</td></tr>}
+              )}
             </tbody>
           </table>
         </div>
@@ -861,14 +965,18 @@ function AuthorsPage({ authors, search }) {
         <div className="panel-header"><h3>Top Authors</h3></div>
         {list
           .slice()
-          .sort((a, b) => b.total - a.total)
+          .sort((a, b) => (b.story_count || 0) - (a.story_count || 0))
           .slice(0, 8)
           .map((a) => (
-            <div className="activity-item" key={a.name}>
-              <div className="avatar-fallback" style={{ width: 28, height: 28 }}>{a.name[0]}</div>
+            <div className="activity-item" key={a.id}>
+              <div className="avatar-fallback" style={{ width: 28, height: 28 }}>
+                {(a.display_name || "?")[0]}
+              </div>
               <div>
-                <div style={{ fontWeight: 600 }}>{a.name}</div>
-                <div style={{ fontSize: ".75rem", color: "var(--text-muted)" }}>{a.total} novels</div>
+                <div style={{ fontWeight: 600 }}>{a.display_name}</div>
+                <div style={{ fontSize: ".75rem", color: "var(--text-muted)" }}>
+                  {a.story_count || 0} novels
+                </div>
               </div>
             </div>
           ))}
@@ -908,11 +1016,16 @@ function UsersPage({ profile, supportRequests, onUpdateSupport }) {
     try {
       if (action === "ban") await banUser(id);
       else if (action === "unban") await unbanUser(id);
-      else if (action === "suspend") await suspendUser(id);
-      else if (action === "unsuspend") await unsuspendUser(id);
+      else if (action === "suspend") {
+        const raw = window.prompt("Suspend for how many days?", "7");
+        if (raw === null) return;
+        const days = Math.max(1, parseInt(raw, 10) || 7);
+        await suspendUser(id, days);
+      } else if (action === "unsuspend") await unsuspendUser(id);
       else if (action === "activate") await activateUser(id);
+      else if (action === "restore") await restoreUser(id);
       else if (action === "delete") {
-        if (!window.confirm("Delete this user permanently?")) return;
+        if (!window.confirm("Soft-delete this account? Login will be blocked. Data is kept.")) return;
         await deleteAdminUser(id);
       }
       await load();
@@ -970,8 +1083,10 @@ function UsersPage({ profile, supportRequests, onUpdateSupport }) {
               {!loading && filtered.map((u) => {
                 const banned = !!u.is_banned;
                 const suspended = !!u.is_suspended;
+                const deleted = !!u.is_deleted;
                 let status = "Active";
-                if (banned) status = "Banned";
+                if (deleted) status = "Deleted";
+                else if (banned) status = "Banned";
                 else if (suspended) status = "Suspended";
                 return (
                   <tr key={u.id}>
@@ -1038,7 +1153,7 @@ function UsersPage({ profile, supportRequests, onUpdateSupport }) {
                             Suspend
                           </button>
                         )}
-                        {(banned || suspended) && (
+                        {(banned || suspended) && !deleted && (
                           <button
                             type="button"
                             className="btn-primary"
@@ -1048,15 +1163,31 @@ function UsersPage({ profile, supportRequests, onUpdateSupport }) {
                             Activate
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          style={{ color: "#ef4444" }}
-                          disabled={busyId === u.id}
-                          onClick={() => runAction(u.id, "delete")}
-                        >
-                          Delete
-                        </button>
+                        {deleted ? (
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "restore")}
+                          >
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            style={{ color: "#ef4444" }}
+                            disabled={busyId === u.id}
+                            onClick={() => runAction(u.id, "delete")}
+                          >
+                            Soft delete
+                          </button>
+                        )}
+                        {u.suspended_until ? (
+                          <span style={{ fontSize: ".7rem", color: "var(--text-muted)" }}>
+                            until {String(u.suspended_until).slice(0, 10)}
+                          </span>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

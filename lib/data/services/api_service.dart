@@ -413,10 +413,19 @@ class ApiService {
       _ensureSuccessResponse(response);
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       final items = body['items'];
-      if (items is List) {
-        return items.cast<Map<String, dynamic>>();
-      }
-      return const [];
+      if (items is! List) return const [];
+      return items.map<Map<String, dynamic>>((raw) {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final book = m['book'];
+        if (book is Map) {
+          final b = Map<String, dynamic>.from(book);
+          m['book_id'] = m['book_id'] ?? b['id'];
+          m['book_title'] = m['book_title'] ?? b['title'];
+          m['book_author'] = m['book_author'] ?? b['author'];
+          m['cover_path'] = m['cover_path'] ?? b['cover_path'];
+        }
+        return m;
+      }).toList();
     } catch (_) {
       return const [];
     }
@@ -592,6 +601,18 @@ class ApiService {
   Future<List<Map<String, dynamic>>> fetchUserWall(int userId) async {
     try {
       final response = await _get('/api/users/$userId/wall');
+      if (response.statusCode != 200) return const <Map<String, dynamic>>[];
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+
+  Future<List<Map<String, dynamic>>> fetchUserActivity(int userId) async {
+    try {
+      final response = await _get('/api/users/$userId/activity');
       if (response.statusCode != 200) return const <Map<String, dynamic>>[];
       final payload = jsonDecode(response.body) as Map<String, dynamic>;
       return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
