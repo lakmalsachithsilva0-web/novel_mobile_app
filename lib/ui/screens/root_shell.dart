@@ -56,7 +56,13 @@ class _RootShellState extends State<RootShell> {
   Future<void> _bootstrapApp() async {
     final session = await _authService.restoreSession();
     if (!mounted) return;
-    setState(() => _session = session);
+    setState(() {
+      _session = session;
+      // First launch / no session → login screen first (user can still browse after skip if offered)
+      if (session == null) {
+        _showLoginOverlay = true;
+      }
+    });
     await _loadBootstrap();
   }
 

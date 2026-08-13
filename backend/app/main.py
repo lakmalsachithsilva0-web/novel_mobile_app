@@ -509,6 +509,44 @@ def create_user_token(user_id: int) -> str:
 
 
 
+
+def _ensure_wall_posts_table() -> None:
+    """Dedicated wall posts (profile Wall tab). Soft schema; never drops data."""
+    try:
+        execute_write(
+            """
+            CREATE TABLE IF NOT EXISTS wall_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                target_user_id INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                image_path TEXT DEFAULT '',
+                likes_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            (),
+        )
+    except Exception:
+        # MySQL / Postgres variants
+        try:
+            execute_write(
+                """
+                CREATE TABLE IF NOT EXISTS wall_posts (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    target_user_id INT NOT NULL,
+                    body TEXT NOT NULL,
+                    image_path VARCHAR(512) DEFAULT '',
+                    likes_count INT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """,
+                (),
+            )
+        except Exception:
+            pass
+
 def _ensure_user_moderation_columns() -> None:
     """Soft-moderation flags: never hard-delete user rows."""
     for col_sql in (
@@ -2181,6 +2219,16 @@ def create_writer_story(
         ),
     )
     _set_story_tags(story_id, payload.tags)
+    try:
+        execute_write(
+            "UPDATE app_users SET is_author=1, is_author_active=1 WHERE id=%s",
+            (user["user_id"],),
+        )
+    except Exception:
+        try:
+            execute_write("UPDATE app_users SET is_author=1 WHERE id=%s", (user["user_id"],))
+        except Exception:
+            pass
     bump_content_version()
     return {"ok": True, "id": story_id}
 
@@ -3352,32 +3400,21 @@ def list_user_reviews(user_id: int):
 
 @app.get("/api/users/{user_id}/wall")
 def list_user_wall(user_id: int):
-    """Wall posts directed at or by this user (uses chat_messages if present)."""
+    """Profile Wall: posts on this user's wall (real data from wall_posts)."""
+    _ensure_wall_posts_table()
     try:
         rows = fetch_all(
             """
-            SELECT id, user_id, body, image_path, created_at
-            FROM chat_messages
-            WHERE user_id=%s OR target_user_id=%s
+            SELECT id, user_id, target_user_id, body, image_path, likes_count, created_at
+            FROM wall_posts
+            WHERE target_user_id=%s OR user_id=%s
             ORDER BY id DESC
-            LIMIT 50
+            LIMIT 80
             """,
             (user_id, user_id),
         )
     except Exception:
-        try:
-            rows = fetch_all(
-                """
-                SELECT id, user_id, body, created_at
-                FROM chat_messages
-                WHERE user_id=%s
-                ORDER BY id DESC
-                LIMIT 50
-                """,
-                (user_id,),
-            )
-        except Exception:
-            rows = []
+        rows = []
     items = []
     for row in rows:
         uid = _row_get(row, "user_id")
@@ -3396,12 +3433,14 @@ def list_user_wall(user_id: int):
         items.append({
             "id": _row_get(row, "id"),
             "user_id": uid,
+            "sender_name": uname,
             "display_name": uname,
             "photo_url": photo,
             "body": _row_get(row, "body") or "",
-            "image_path": _row_get(row, "image_path") or "",
+            "message": _row_get(row, "body") or "",
+            "image_path": _normalize_cover_path(_row_get(row, "image_path") or ""),
             "created_at": str(_row_get(row, "created_at") or ""),
-            "likes": 0,
+            "likes": int(_row_get(row, "likes_count") or 0),
         })
     return {"items": items}
 
@@ -3412,27 +3451,20 @@ def post_user_wall(
     payload: dict[str, Any],
     user: dict[str, Any] = Depends(require_user),
 ):
-    body = (payload.get("body") or "").strip()
+    """Create a wall post on target user's profile (requires login)."""
+    _ensure_wall_posts_table()
+    body = (payload.get("body") or payload.get("message") or "").strip()
     if not body:
         raise HTTPException(status_code=400, detail="Empty post")
-    image_path = payload.get("image_path") or ""
-    try:
-        execute_write(
-            """
-            INSERT INTO chat_messages (user_id, target_user_id, body, image_path, created_at)
-            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            """,
-            (user["user_id"], user_id, body, image_path),
-        )
-    except Exception:
-        execute_write(
-            """
-            INSERT INTO chat_messages (user_id, body, created_at)
-            VALUES (%s, %s, CURRENT_TIMESTAMP)
-            """,
-            (user["user_id"], body),
-        )
-    return {"ok": True}
+    image_path = payload.get("image_path") or payload.get("image_url") or ""
+    row_id, _ = execute_write(
+        """
+        INSERT INTO wall_posts (user_id, target_user_id, body, image_path, likes_count, created_at)
+        VALUES (%s, %s, %s, %s, 0, CURRENT_TIMESTAMP)
+        """,
+        (user["user_id"], user_id, body, image_path),
+    )
+    return {"ok": True, "id": row_id}
 
 
 # ----- Admin: users list + ban / unban -----

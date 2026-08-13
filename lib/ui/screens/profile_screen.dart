@@ -718,66 +718,57 @@ class _ProfileScreenState extends State<ProfileScreen>
           const Text('No public reading lists yet.', style: TextStyle(color: muted))
         else
           SizedBox(
-            height: 168,
+            height: 210,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
               itemCount: lists.length,
               separatorBuilder: (_, __) => const SizedBox(width: 14),
               itemBuilder: (context, i) {
                 final list = lists[i];
                 final name = _s(list['name'] ?? list['title']);
                 final count = _asInt(list['story_count'] ?? list['count']);
-                // Galatea-style collage: up to 4 covers in a 2x2 grid
+                // Prefer first of covers[] collage, else cover_path — single cover slider
+                String cover = '';
                 final dynamic rawCovers = list['covers'];
-                final covers = <String>[];
-                if (rawCovers is List) {
-                  for (final c in rawCovers) {
-                    final s = _s(c);
-                    if (s.isNotEmpty) covers.add(s);
-                  }
+                if (rawCovers is List && rawCovers.isNotEmpty) {
+                  cover = _s(rawCovers.first);
                 }
-                final single = _s(list['cover_path']);
-                if (covers.isEmpty && single.isNotEmpty) covers.add(single);
-                while (covers.length < 4) {
-                  covers.add(''); // placeholders fill the grid
-                }
+                if (cover.isEmpty) cover = _s(list['cover_path']);
                 return SizedBox(
-                  width: 128,
+                  width: 130,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: GridView.count(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 2,
-                            crossAxisSpacing: 2,
-                            physics: const NeverScrollableScrollPhysics(),
-                            children: [
-                              for (var j = 0; j < 4; j++)
-                                covers[j].isNotEmpty
-                                    ? Image.network(
-                                        widget.apiService.resolveAssetUrl(covers[j]),
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) =>
-                                            Container(color: const Color(0xFFE8EAED)),
-                                      )
-                                    : Container(color: const Color(0xFFF0F1F3)),
-                            ],
-                          ),
+                          child: cover.isNotEmpty
+                              ? Image.network(
+                                  widget.apiService.resolveAssetUrl(cover),
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: cardBg,
+                                    child: const Icon(Icons.collections_bookmark_outlined, color: muted),
+                                  ),
+                                )
+                              : Container(
+                                  color: cardBg,
+                                  child: const Icon(Icons.collections_bookmark_outlined, color: muted),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        name,
+                        name.isEmpty ? 'List' : name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                       Text(
                         '$count Stories',
-                        style: const TextStyle(fontSize: 11, color: muted),
+                        style: const TextStyle(fontSize: 12, color: muted),
                       ),
                     ],
                   ),
@@ -785,7 +776,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               },
             ),
           ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
         const Text('Achievements', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         _buildAchievementsGrid(),
@@ -1090,11 +1081,14 @@ class _ProfileScreenState extends State<ProfileScreen>
 
 
   Future<void> _composeWallPost() async {
-    final targetId = widget.viewingUserId ??
-        _asInt(_userProfile?['id']);
-    final resolvedId = targetId != 0
-        ? targetId
-        : (widget.profile.id ?? 0);
+    // Wall target = profile being viewed (other user or self)
+    int resolvedId = widget.viewingUserId ?? 0;
+    if (resolvedId == 0) {
+      resolvedId = _asInt(_userProfile?['id']);
+    }
+    if (resolvedId == 0) {
+      resolvedId = widget.profile.id ?? 0;
+    }
     if (resolvedId == 0) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1106,6 +1100,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
           left: 16,
@@ -1134,7 +1132,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             const SizedBox(height: 12),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: brand,
+                backgroundColor: teal,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.pop(ctx, true),
@@ -1144,21 +1142,26 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
       ),
     );
-    if (ok != true || ctrl.text.trim().isEmpty) return;
+    final text = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true || text.isEmpty) return;
     try {
-      await widget.apiService.postUserWall(resolvedId, ctrl.text.trim());
-      await _loadAll();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Posted')),
-        );
-      }
+      await widget.apiService.postUserWall(resolvedId, text);
+      if (!mounted) return;
+      // Reload wall posts only (keep other tabs)
+      final wall = await widget.apiService.fetchUserWall(resolvedId);
+      if (!mounted) return;
+      setState(() {
+        _wall = wall;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Posted to wall')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not post: $e')),
+      );
     }
   }
 

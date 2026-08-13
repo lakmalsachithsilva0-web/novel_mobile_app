@@ -738,6 +738,33 @@ class _AuthorsStripState extends State<_AuthorsStrip> {
                 children: [
                   GestureDetector(
                     onTap: authorId != null
+                        ? () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ProfileScreen(
+                                  apiService: widget.apiService,
+                                  viewingUserId: authorId,
+                                  achievements: const [],
+                                  profile: ProfileModel(
+                                    id: authorId,
+                                    displayName: author,
+                                    username: author.toLowerCase().replaceAll(' ', ''),
+                                    photoUrl: '',
+                                    coverUrl: '',
+                                    following: 0,
+                                    followers: 0,
+                                    blocked: 0,
+                                    chaptersRead: 0,
+                                    socialKarma: 0,
+                                    dayStreak: 0,
+                                    readingLists: const [],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                        : null,
+                    onLongPress: authorId != null
                         ? () => _toggleFollowFor(authorId)
                         : null,
                     child: Stack(
