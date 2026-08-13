@@ -95,6 +95,3 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 "postman_mcp.py" 
-
-# Add this line to your .gitignore file
-*.zip
