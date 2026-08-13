@@ -93,13 +93,9 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
       final items = await widget.apiService.fetchTags();
       if (!mounted) return;
       setState(() {
+        // fetchTags always returns List<Map<String, dynamic>>
         _availableTags = items
-            .map((e) {
-              if (e is Map) {
-                return (e['name'] ?? e['tag'] ?? e['label'] ?? '').toString();
-              }
-              return e.toString();
-            })
+            .map((e) => (e['name'] ?? e['tag'] ?? e['label'] ?? '').toString())
             .where((t) => t.isNotEmpty)
             .map((t) => t.startsWith('#') ? t.substring(1) : t)
             .toList();
@@ -279,7 +275,7 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
                       widget.apiService.resolveAssetUrl(_coverPath),
                       fit: BoxFit.cover,
                       width: double.infinity,
-                      errorBuilder: (_, __, ___) => const Center(
+                      errorBuilder: (_, _, _) => const Center(
                         child: Icon(Icons.image_outlined, size: 40),
                       ),
                     )
