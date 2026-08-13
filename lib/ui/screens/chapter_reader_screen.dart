@@ -95,10 +95,9 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       if (!mounted || list.isEmpty) return;
       setState(() {
         _chapters = list;
-        final idx = list.indexWhere(
-          (c) => (c['chapter_number'] as num?)?.toInt() == widget.chapterNumber,
-        );
-        _chapterIndex = idx >= 0 ? idx : 0;
+        if (_chapterIndex >= _chapters.length) {
+          _chapterIndex = _chapters.length - 1;
+        }
         _applyChapter(_chapters[_chapterIndex]);
       });
     } catch (_) {}
@@ -107,9 +106,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   void _applyChapter(Map<String, dynamic> chapter) {
     _chapterTitle = chapter['title'] as String? ?? 'Untitled';
     _chapterContent = chapter['content'] as String? ?? '';
-    _chapterNumber =
-        (chapter['chapter_number'] as num?)?.toInt() ?? (_chapterIndex + 1);
-    _selectedReactions.clear();
+    _chapterNumber = (chapter['chapter_number'] as num?)?.toInt() ??
+        (_chapterIndex + 1);
   }
 
   Color get _bg {
@@ -117,27 +115,73 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       case _ReaderTheme.white:
         return Colors.white;
       case _ReaderTheme.eggshell:
-        return const Color(0xFFF5F0E6);
+        return const Color(0xFFF5F0E8);
       case _ReaderTheme.nightowl:
         return const Color(0xFF1A1A1A);
     }
   }
 
-  Color get _fg =>
-      _theme == _ReaderTheme.nightowl ? Colors.white : Colors.black87;
-
-  Color get _muted =>
-      _theme == _ReaderTheme.nightowl ? Colors.white60 : Colors.black54;
-
-  Future<void> _goNext() async {
-    if (_chapterIndex >= _chapters.length - 1) return;
-    setState(() {
-      _chapterIndex++;
-      _applyChapter(_chapters[_chapterIndex]);
-    });
+  Color get _fg {
+    return _theme == _ReaderTheme.nightowl ? Colors.white : Colors.black87;
   }
 
-  void _openChapterList() {
+  Color get _muted {
+    return _theme == _ReaderTheme.nightowl
+        ? Colors.white60
+        : Colors.black54;
+  }
+
+  Future<void> _loadLikeState() async {
+    final bookId = widget.bookId;
+    if (bookId == null) return;
+    try {
+      final res = await widget.apiService.fetchBookLike(bookId);
+      if (!mounted) return;
+      setState(() {
+        _liked = (res['liked'] as bool?) ?? false;
+        _likeCount = (res['likes_count'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLike() async {
+    final bookId = widget.bookId;
+    if (bookId == null) {
+      setState(() {
+        _liked = !_liked;
+        _likeCount += _liked ? 1 : -1;
+        if (_likeCount < 0) _likeCount = 0;
+      });
+      return;
+    }
+    try {
+      final res = _liked
+          ? await widget.apiService.unlikeBook(bookId)
+          : await widget.apiService.likeBook(bookId);
+      if (!mounted) return;
+      setState(() {
+        _liked = (res['liked'] as bool?) ?? !_liked;
+        _likeCount = (res['likes_count'] as num?)?.toInt() ?? _likeCount;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to like. One like per account.')),
+      );
+    }
+  }
+
+  Future<void> _share() async {
+    final text =
+        'Read ${widget.title} by ${widget.author} — Chapter $_chapterNumber: $_chapterTitle';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Story link copied — share it anywhere')),
+    );
+  }
+
+  void _openChapterDrawer() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -146,9 +190,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
-        final coverUrl = widget.coverPath.isEmpty
-            ? null
-            : widget.apiService.resolveAssetUrl(widget.coverPath);
         return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.75,
@@ -168,98 +209,39 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Row(
-                    children: [
-                      if (coverUrl != null)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: Image.network(
-                            coverUrl,
-                            width: 48,
-                            height: 68,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                const Icon(Icons.menu_book, size: 40),
-                          ),
-                        )
-                      else
-                        const Icon(Icons.menu_book, size: 40),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              ),
-                            ),
-                            Text(
-                              'By ${widget.author}',
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Report submitted. Thank you.'),
-                            ),
-                          );
-                        },
-                        child: const Text(
-                          'Report Story',
-                          style: TextStyle(color: Colors.red, fontSize: 12),
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    widget.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-                const Divider(height: 1),
                 Expanded(
                   child: ListView.builder(
                     controller: scrollCtrl,
                     itemCount: _chapters.isEmpty ? 1 : _chapters.length,
-                    itemBuilder: (context, index) {
+                    itemBuilder: (_, i) {
                       if (_chapters.isEmpty) {
                         return ListTile(
-                          title: Text(
-                            'Chapter $_chapterNumber: $_chapterTitle',
-                          ),
-                          selected: true,
+                          title: Text(_chapterTitle),
+                          subtitle: Text('Chapter $_chapterNumber'),
                         );
                       }
-                      final c = _chapters[index];
-                      final chapterNo =
-                          (c['chapter_number'] as num?)?.toInt() ?? index + 1;
-                      final title = c['title'] as String? ?? 'Untitled';
-                      final selected = index == _chapterIndex;
+                      final c = _chapters[i];
+                      final num = (c['chapter_number'] as num?)?.toInt() ?? i + 1;
+                      final title = c['title'] as String? ?? 'Chapter $num';
+                      final selected = i == _chapterIndex;
                       return ListTile(
                         selected: selected,
-                        selectedTileColor: const Color(0xFFFFF0EE),
-                        title: Text(
-                          'Chapter $chapterNo: $title',
-                          style: TextStyle(
-                            fontWeight:
-                                selected ? FontWeight.w700 : FontWeight.w500,
-                            fontSize: 14,
-                          ),
-                        ),
+                        title: Text(title),
+                        subtitle: Text('Chapter $num'),
                         onTap: () {
+                          Navigator.pop(ctx);
                           setState(() {
-                            _chapterIndex = index;
+                            _chapterIndex = i;
                             _applyChapter(c);
                           });
-                          Navigator.pop(ctx);
                         },
                       );
                     },
@@ -273,6 +255,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     );
   }
 
+<<<<<<< HEAD
   Future<void> _share() async {
     final text =
         'Read ${widget.title} by ${widget.author} — Chapter $_chapterNumber: $_chapterTitle';
@@ -323,6 +306,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     }
   }
 
+=======
+>>>>>>> 719ee01d93a55320f534cf43f18260e34fe81749
   @override
   Widget build(BuildContext context) {
     final total = _chapters.isEmpty ? 1 : _chapters.length;
@@ -343,355 +328,143 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.info_outline, color: _muted),
-            onPressed: () {
-              showDialog<void>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: Text(widget.title),
-                  content: Text(
-                    'By ${widget.author}\n\nChapter $_chapterNumber: $_chapterTitle',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Close'),
-                    ),
-                  ],
-                ),
-              );
-            },
+            icon: const Icon(Icons.list),
+            onPressed: _openChapterDrawer,
+          ),
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            onPressed: _share,
+          ),
+          IconButton(
+            icon: const Icon(Icons.text_fields),
+            onPressed: () => setState(() => _showThemePanel = !_showThemePanel),
           ),
         ],
       ),
       body: Column(
         children: [
+          if (_showThemePanel)
+            Container(
+              color: _bg,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  for (final t in _ReaderTheme.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(t.name),
+                        selected: _theme == t,
+                        onSelected: (_) => setState(() => _theme = t),
+                      ),
+                    ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.remove),
+                    onPressed: () => setState(() {
+                      if (_fontSize > 12) _fontSize -= 1;
+                    }),
+                  ),
+                  Text('${_fontSize.toInt()}'),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: () => setState(() {
+                      if (_fontSize < 28) _fontSize += 1;
+                    }),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              children: [
-                const SizedBox(height: 12),
-                Center(
-                  child: Text(
-                    '🌸  ${widget.title}',
-                    textAlign: TextAlign.center,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Chapter $_chapterNumber',
+                    style: TextStyle(color: _muted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _chapterTitle,
                     style: TextStyle(
                       color: _fg,
-                      fontSize: _fontSize + 2,
+                      fontSize: 22,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Center(
-                  child: Text(
-                    'By ${widget.author}',
-                    style: TextStyle(color: _muted, fontSize: _fontSize - 2),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: Text(
-                    '〜〜〜〜〜〜〜〜',
-                    style: TextStyle(color: _muted, letterSpacing: 2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _chapterTitle.toUpperCase().contains('CHAPTER') ||
-                          _chapterTitle.toUpperCase().contains('PROLOGUE')
-                      ? _chapterTitle
-                      : 'CHAPTER $_chapterNumber: $_chapterTitle',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _fg,
-                    fontSize: _fontSize + 1,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  _chapterContent.isEmpty
-                      ? 'This chapter has not been written yet.'
-                      : _chapterContent,
-                  style: TextStyle(
-                    color: _fg,
-                    fontSize: _fontSize,
-                    height: 1.75,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                if (hasNext)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: _goNext,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A73E8),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text(
-                          'Next Chapter',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                Center(
-                  child: Text(
-                    'Let ${widget.author} know what you thought about this chapter!',
-                    textAlign: TextAlign.center,
+                  const SizedBox(height: 20),
+                  Text(
+                    _chapterContent.isEmpty
+                        ? 'This chapter has no content yet.'
+                        : _chapterContent,
                     style: TextStyle(
-                      color: _muted,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
+                      color: _fg,
+                      fontSize: _fontSize,
+                      height: 1.7,
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 12,
-                  alignment: WrapAlignment.center,
-                  children: _reactionOptions.map((opt) {
-                    final emoji = opt[0];
-                    final label = opt[1];
-                    final selected = _selectedReactions.contains(label);
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (selected) {
-                            _selectedReactions.remove(label);
-                          } else {
-                            _selectedReactions.add(label);
-                          }
-                        });
-                      },
-                      child: SizedBox(
-                        width: 88,
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? const Color(0xFFE8F0FE)
-                                    : (_theme == _ReaderTheme.nightowl
-                                        ? Colors.white12
-                                        : Colors.grey.shade100),
-                                shape: BoxShape.circle,
-                                border: selected
-                                    ? Border.all(
-                                        color: const Color(0xFF1A73E8),
-                                        width: 1.5,
-                                      )
-                                    : null,
-                              ),
-                              child: Text(
-                                emoji,
-                                style: const TextStyle(fontSize: 22),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              label,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: _muted, fontSize: 11),
-                            ),
-                          ],
-                        ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _actionChip(
+                        icon: _liked ? Icons.favorite : Icons.favorite_border,
+                        label: _likeCount > 0 ? '$_likeCount Likes' : 'Like',
+                        color: _liked ? Colors.red : null,
+                        onTap: _toggleLike,
                       ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 40),
-              ],
-            ),
-          ),
-          if (_showThemePanel) _buildThemePanel(),
-          _buildBottomBar(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildThemePanel() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      decoration: BoxDecoration(
-        color: _bg,
-        border: Border(
-          top: BorderSide(color: _muted.withValues(alpha: 0.2)),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _themeChip(
-                'White',
-                _ReaderTheme.white,
-                Colors.white,
-                Colors.black,
-              ),
-              _themeChip(
-                'Eggshell',
-                _ReaderTheme.eggshell,
-                const Color(0xFFF5F0E6),
-                Colors.black87,
-              ),
-              _themeChip(
-                'Nightowl',
-                _ReaderTheme.nightowl,
-                const Color(0xFF1A1A1A),
-                Colors.white,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text('Font size', style: TextStyle(color: _muted, fontSize: 12)),
-          Row(
-            children: [
-              Text('A−', style: TextStyle(color: _fg, fontSize: 12)),
-              Expanded(
-                child: Slider(
-                  value: _fontSize,
-                  min: 14,
-                  max: 24,
-                  divisions: 10,
-                  activeColor: const Color(0xFFE85D4C),
-                  onChanged: (v) => setState(() => _fontSize = v),
-                ),
-              ),
-              Text('A+', style: TextStyle(color: _fg, fontSize: 16)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _themeChip(
-    String label,
-    _ReaderTheme value,
-    Color bg,
-    Color fg,
-  ) {
-    final selected = _theme == value;
-    return GestureDetector(
-      onTap: () => setState(() => _theme = value),
-      child: Column(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color:
-                    selected ? const Color(0xFFE85D4C) : Colors.grey.shade400,
-                width: selected ? 2 : 1,
-              ),
-            ),
-            child: Text(
-              'A',
-              style: TextStyle(color: fg, fontWeight: FontWeight.w700),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: _muted, fontSize: 11)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomBar() {
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        decoration: BoxDecoration(
-          color: _bg,
-          border: Border(
-            top: BorderSide(color: _muted.withValues(alpha: 0.2)),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _barItem(
-              icon: Icons.text_fields,
-              label: 'Theme',
-              onTap: () =>
-                  setState(() => _showThemePanel = !_showThemePanel),
-            ),
-            _barItem(
-              icon: _liked ? Icons.favorite : Icons.favorite_border,
-              label: _likeCount > 0 ? '$_likeCount Likes' : 'Like',
-              color: _liked ? Colors.red : null,
-              onTap: _toggleLike,
-            ),
-            _barItem(
-              icon: Icons.chat_bubble_outline,
-              label: 'Comments',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Comments will appear here when posted'),
+                      _actionChip(
+                        icon: Icons.share_outlined,
+                        label: 'Share',
+                        onTap: _share,
+                      ),
+                    ],
                   ),
-                );
-              },
+                  if (hasNext) ...[
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF00C853),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _chapterIndex++;
+                            _applyChapter(_chapters[_chapterIndex]);
+                          });
+                        },
+                        child: const Text('Next chapter'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            _barItem(
-              icon: Icons.ios_share,
-              label: 'Share',
-              onTap: _share,
-            ),
-            _barItem(
-              icon: Icons.menu,
-              label: 'Chapter',
-              onTap: _openChapterList,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _barItem({
+  Widget _actionChip({
     required IconData icon,
     required String label,
-    required VoidCallback onTap,
     Color? color,
+    required VoidCallback onTap,
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.all(8),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22, color: color ?? _muted),
-            const SizedBox(height: 2),
+            Icon(icon, color: color ?? _muted),
+            const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(color: color ?? _muted, fontSize: 10),

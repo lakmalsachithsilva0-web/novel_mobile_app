@@ -124,11 +124,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 final chapterTitle =
                     chapter['title'] as String? ?? 'Untitled chapter';
                 final chapterNumber =
-                    chapter['chapter_number'] as int? ?? index;
+                    (chapter['chapter_number'] as num?)?.toInt() ?? index;
                 final chapterContent = chapter['content'] as String? ?? '';
                 final snippet = chapterContent.isEmpty
-                    ? 'This chapter has not been added yet.'
-                    : chapterContent.replaceAll('\n', ' ').trim();
+                    ? 'No preview available.'
+                    : (chapterContent.length > 180
+                        ? '${chapterContent.substring(0, 180)}…'
+                        : chapterContent);
+
                 return InkWell(
                   onTap: () {
                     Navigator.of(context).push(
