@@ -1,1 +1,1 @@
-// PLACEHOLDER - loading full content next
+export { default } from "./admin_App";
