@@ -71,43 +71,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (widget.coverPath.isNotEmpty)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: SizedBox(
-                            width: double.infinity,
-                            height: 200,
-                            child: Image.network(
-                              widget.apiService.resolveAssetUrl(
-                                widget.coverPath,
-                              ),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(20),
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          Color(0xFF667EEA),
-                                          Color(0xFFFF6B9D),
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                    ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.auto_stories_outlined,
-                                        size: 64,
-                                        color: Colors.white54,
-                                      ),
-                                    ),
-                                  ),
-                            ),
-                          ),
-                        ),
-                      if (widget.coverPath.isNotEmpty)
-                        const SizedBox(height: 18),
                       Text(
                         widget.title,
                         style: Theme.of(context).textTheme.headlineSmall
@@ -161,11 +124,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 final chapterTitle =
                     chapter['title'] as String? ?? 'Untitled chapter';
                 final chapterNumber =
-                    chapter['chapter_number'] as int? ?? index;
+                    (chapter['chapter_number'] as num?)?.toInt() ?? index;
                 final chapterContent = chapter['content'] as String? ?? '';
                 final snippet = chapterContent.isEmpty
-                    ? 'This chapter has not been added yet.'
-                    : chapterContent.replaceAll('\n', ' ').trim();
+                    ? 'No preview available.'
+                    : (chapterContent.length > 180
+                        ? '${chapterContent.substring(0, 180)}…'
+                        : chapterContent);
+
                 return InkWell(
                   onTap: () {
                     Navigator.of(context).push(
