@@ -481,7 +481,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                             Image.network(
                               _coverUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _defaultCover(),
+                              errorBuilder: (_, _, _) => _defaultCover(),
                             )
                           else
                             _defaultCover(),
@@ -723,7 +723,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
               itemCount: lists.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
               itemBuilder: (context, i) {
                 final list = lists[i];
                 final name = _s(list['name'] ?? list['title']);
@@ -748,7 +748,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   widget.apiService.resolveAssetUrl(cover),
                                   width: double.infinity,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
+                                  errorBuilder: (_, _, _) => Container(
                                     color: cardBg,
                                     child: const Icon(Icons.collections_bookmark_outlined, color: muted),
                                   ),
@@ -832,7 +832,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           crossAxisSpacing: 12,
           childAspectRatio: 1.15,
         ),
-        itemBuilder: (_, __) => Container(
+        itemBuilder: (_, _) => Container(
           decoration: BoxDecoration(
             color: const Color(0xFFF0F1F3),
             borderRadius: BorderRadius.circular(10),
@@ -914,7 +914,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: list.length,
-                  separatorBuilder: (_, __) => const Divider(height: 24),
+                  separatorBuilder: (_, _) => const Divider(height: 24),
                   itemBuilder: (context, i) => _storyRow(list[i]),
                 ),
         ),
@@ -993,7 +993,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     width: 72,
                     height: 100,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(width: 72, height: 100, color: cardBg),
+                    errorBuilder: (_, _, _) => Container(width: 72, height: 100, color: cardBg),
                   )
                 : Container(width: 72, height: 100, color: cardBg),
           ),
@@ -1252,7 +1252,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       child: Image.network(
                         widget.apiService.resolveAssetUrl(img),
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
                       ),
                     ),
                   ],
@@ -1355,7 +1355,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       width: double.infinity,
                       height: 180,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
                     ),
                   ),
                 ),
@@ -1375,7 +1375,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       itemCount: _reviews.length,
-      separatorBuilder: (_, __) => const Divider(height: 28),
+      separatorBuilder: (_, _) => const Divider(height: 28),
       itemBuilder: (context, i) {
         final r = _reviews[i];
         final bookTitle = _s(r['book_title'] ?? r['title'] ?? 'Story');
@@ -1401,7 +1401,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                           width: 40,
                           height: 56,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(width: 40, height: 56, color: cardBg),
+                          errorBuilder: (_, _, _) => Container(width: 40, height: 56, color: cardBg),
                         )
                       : Container(width: 40, height: 56, color: cardBg),
                 ),
