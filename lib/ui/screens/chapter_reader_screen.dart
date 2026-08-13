@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../data/services/api_service.dart';
 
-/// Inkitt-style chapter reader: themes, reactions, next chapter, chapter drawer.
+/// Inkitt-style chapter reader: cover at start, mid-chapter ads,
+/// Next Chapter ads, themes, reactions, native share, scroll-to-top.
 class ChapterReaderScreen extends StatefulWidget {
   const ChapterReaderScreen({
     super.key,
@@ -53,6 +55,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   final Set<String> _selectedReactions = {};
   bool _liked = false;
   int _likeCount = 0;
+  final ScrollController _scrollController = ScrollController();
 
   static const _reactionOptions = <List<String>>[
     ['❤️', 'Love this'],
@@ -86,6 +89,12 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       _chapterNumber = widget.chapterNumber;
     }
     _loadChaptersIfNeeded();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadChaptersIfNeeded() async {
@@ -134,6 +143,12 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     setState(() {
       _chapterIndex++;
       _applyChapter(_chapters[_chapterIndex]);
+    });
+    // Scroll to top of the new chapter
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
     });
   }
 
@@ -260,6 +275,11 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                             _applyChapter(c);
                           });
                           Navigator.pop(ctx);
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (_scrollController.hasClients) {
+                              _scrollController.jumpTo(0);
+                            }
+                          });
                         },
                       );
                     },
@@ -275,12 +295,17 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
 
   Future<void> _share() async {
     final text =
-        'Read ${widget.title} by ${widget.author} — Chapter $_chapterNumber: $_chapterTitle';
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Story link copied — share it anywhere')),
-    );
+        'Read "${widget.title}" by ${widget.author} — Chapter $_chapterNumber: $_chapterTitle\n'
+        'Read free on our app.';
+    try {
+      await Share.share(text, subject: widget.title);
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Story link copied — share it anywhere')),
+      );
+    }
   }
 
   Future<void> _loadLikeState() async {
@@ -323,12 +348,83 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     }
   }
 
+  Widget _buildAdBanner({required String label}) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _theme == _ReaderTheme.nightowl
+            ? Colors.white10
+            : const Color(0xFFF0F4F8),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _theme == _ReaderTheme.nightowl
+              ? Colors.white24
+              : const Color(0xFFD0D7DE),
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Advertisement',
+            style: TextStyle(
+              color: _muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _fg,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Sponsored content',
+            style: TextStyle(color: _muted, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Split chapter content roughly in half for mid-chapter ad placement.
+  List<String> _contentParts() {
+    final text = _chapterContent.trim();
+    if (text.isEmpty) return ['', ''];
+    final mid = text.length ~/ 2;
+    final searchStart = (mid - 200).clamp(0, text.length);
+    final searchEnd = (mid + 200).clamp(0, text.length);
+    final window = text.substring(searchStart, searchEnd);
+    final paraBreak = window.indexOf('\n\n');
+    if (paraBreak >= 0) {
+      final splitAt = searchStart + paraBreak;
+      return [text.substring(0, splitAt).trim(), text.substring(splitAt).trim()];
+    }
+    final space = text.lastIndexOf(' ', mid);
+    if (space > 0) {
+      return [text.substring(0, space).trim(), text.substring(space).trim()];
+    }
+    return [text, ''];
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = _chapters.isEmpty ? 1 : _chapters.length;
     final pageLabel = '${_chapterIndex + 1}/$total';
     final hasNext =
         _chapters.isNotEmpty && _chapterIndex < _chapters.length - 1;
+    final parts = _contentParts();
+    final coverUrl = widget.coverPath.isEmpty
+        ? null
+        : widget.apiService.resolveAssetUrl(widget.coverPath);
 
     return Scaffold(
       backgroundColor: _bg,
@@ -368,12 +464,34 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         children: [
           Expanded(
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               children: [
-                const SizedBox(height: 12),
+                // Chapter cover (book cover at start of every chapter)
+                if (coverUrl != null) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        coverUrl,
+                        width: 140,
+                        height: 200,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Container(
+                          width: 140,
+                          height: 200,
+                          color: Colors.grey.shade200,
+                          child: const Icon(Icons.menu_book, size: 48),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Center(
                   child: Text(
-                    '🌸  ${widget.title}',
+                    widget.title,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: _fg,
@@ -411,17 +529,38 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+                // First half of content
                 Text(
-                  _chapterContent.isEmpty
+                  parts[0].isEmpty && parts[1].isEmpty
                       ? 'This chapter has not been written yet.'
-                      : _chapterContent,
+                      : parts[0],
                   style: TextStyle(
                     color: _fg,
                     fontSize: _fontSize,
                     height: 1.75,
                   ),
                 ),
-                const SizedBox(height: 32),
+                // Mid-chapter advertisement
+                if (parts[0].isNotEmpty && parts[1].isNotEmpty)
+                  _buildAdBanner(
+                    label: 'Discover more stories you\'ll love',
+                  ),
+                // Second half of content
+                if (parts[1].isNotEmpty)
+                  Text(
+                    parts[1],
+                    style: TextStyle(
+                      color: _fg,
+                      fontSize: _fontSize,
+                      height: 1.75,
+                    ),
+                  ),
+                const SizedBox(height: 24),
+                // Ad near Next Chapter button
+                if (hasNext)
+                  _buildAdBanner(
+                    label: 'Continue reading more free stories',
+                  ),
                 if (hasNext)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
