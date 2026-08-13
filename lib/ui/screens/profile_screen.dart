@@ -444,7 +444,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                           ),
                           fit: BoxFit.cover,
                           colorFilter: ColorFilter.mode(
-                            Colors.black.withOpacity(0.35),
+                            Colors.black.withValues(alpha: 0.35),
                             BlendMode.darken,
                           ),
                         ),
@@ -536,7 +536,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                 ),
                                 style: OutlinedButton.styleFrom(
                                   side: BorderSide(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                   ),
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(
@@ -612,7 +612,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ),
                                   style: OutlinedButton.styleFrom(
                                     side: BorderSide(
-                                      color: Colors.white.withOpacity(0.7),
+                                      color: Colors.white.withValues(alpha: 0.7),
                                     ),
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(

@@ -449,7 +449,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           width: 160,
                           height: 230,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, _, _) => Container(
                             width: 160,
                             height: 230,
                             color: Colors.grey.shade300,
@@ -937,7 +937,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: _authorStories.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
                   itemBuilder: (context, index) {
                     final b = _authorStories[index];
                     final title = b['title'] as String? ?? '';
@@ -977,7 +977,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                       width: 100,
                                       height: 140,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) =>
+                                      errorBuilder: (_, _, _) =>
                                           Container(
                                         width: 100,
                                         height: 140,
@@ -1026,7 +1026,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: _youMayAlsoLike.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
                   itemBuilder: (context, index) {
                     final b = _youMayAlsoLike[index];
                     final title = b['title'] as String? ?? '';
@@ -1066,7 +1066,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                       width: 100,
                                       height: 140,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) =>
+                                      errorBuilder: (_, _, _) =>
                                           Container(
                                         width: 100,
                                         height: 140,
@@ -1146,7 +1146,7 @@ class _TagBooksScreen extends StatelessWidget {
           : ListView.separated(
               padding: const EdgeInsets.all(12),
               itemCount: books.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final b = books[index];
                 final title = b['title'] as String? ?? 'Untitled';
@@ -1160,7 +1160,7 @@ class _TagBooksScreen extends StatelessWidget {
                           width: 40,
                           height: 56,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
+                          errorBuilder: (_, _, _) =>
                               const Icon(Icons.broken_image),
                         ),
                   title: Text(title),

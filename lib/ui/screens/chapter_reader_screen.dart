@@ -177,7 +177,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                             width: 48,
                             height: 68,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
+                            errorBuilder: (_, _, _) =>
                                 const Icon(Icons.menu_book, size: 40),
                           ),
                         )

@@ -123,7 +123,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   child: ListView.separated(
                     padding: EdgeInsets.zero,
                     itemCount: _tags.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         const Divider(height: 1, color: Color(0xFFEEEEEE)),
                     itemBuilder: (context, index) {
                       final tag = _tags[index];
@@ -254,7 +254,7 @@ class _TagBooksScreenState extends State<_TagBooksScreen> {
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: _stories.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final story = _stories[index];
                     final cover = (story['cover_path'] as String? ?? '');
@@ -281,7 +281,7 @@ class _TagBooksScreenState extends State<_TagBooksScreen> {
                                 width: 44,
                                 height: 64,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
+                                errorBuilder: (_, _, _) => Container(
                                   width: 44,
                                   height: 64,
                                   color: Colors.grey.shade200,
