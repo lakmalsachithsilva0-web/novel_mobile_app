@@ -47,7 +47,8 @@ export function loginAdmin(payload) {
 }
 
 export function getAdminSession() {
-  return request("/api/admin/session");
+  // Backend only allows POST (Bearer token in Authorization header).
+  return request("/api/admin/session", { method: "POST", body: "{}" });
 }
 
 export function getContentVersion() {
