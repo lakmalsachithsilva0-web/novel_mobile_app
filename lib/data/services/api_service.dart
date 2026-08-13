@@ -555,6 +555,59 @@ class ApiService {
     _ensureSuccessResponse(response);
   }
 
+
+  Future<List<Map<String, dynamic>>> fetchUserStories(int userId) async {
+    try {
+      final response = await _get('/api/users/$userId/stories');
+      if (response.statusCode != 200) return const <Map<String, dynamic>>[];
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchUserReadingLists(int userId) async {
+    try {
+      final response = await _get('/api/users/$userId/reading-lists');
+      if (response.statusCode != 200) return const <Map<String, dynamic>>[];
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchUserReviews(int userId) async {
+    try {
+      final response = await _get('/api/users/$userId/reviews');
+      if (response.statusCode != 200) return const <Map<String, dynamic>>[];
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchUserWall(int userId) async {
+    try {
+      final response = await _get('/api/users/$userId/wall');
+      if (response.statusCode != 200) return const <Map<String, dynamic>>[];
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(payload['items'] as List<dynamic>);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<void> postUserWall(int userId, String body, {String? imagePath}) async {
+    final response = await _post('/api/users/$userId/wall', {
+      'body': body,
+      if (imagePath != null && imagePath.isNotEmpty) 'image_path': imagePath,
+    });
+    _ensureSuccessResponse(response);
+  }
+
   Future<Map<String, dynamic>> fetchBookLike(int bookId) async {
     try {
       final response = await _get('/api/books/$bookId/like');

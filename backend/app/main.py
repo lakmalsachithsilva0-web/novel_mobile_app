@@ -1303,23 +1303,34 @@ def bootstrap():
         for section, items in menu_map.items()
     ]
 
+    # Neutral profile shell — real stats come from /api/me and /api/users/{id}
     profile_rows = fetch_all(
         "SELECT display_name, username, following, followers, blocked, chapters_read, social_karma, day_streak FROM profiles LIMIT 1"
     )
-    if not profile_rows:
-        raise HTTPException(status_code=500, detail="Profile is missing")
-
-    profile = profile_rows[0]
-    reading_lists = fetch_all(
-        "SELECT name, story_count, cover_path FROM reading_lists ORDER BY sort_order"
-    )
-
+    if profile_rows:
+        profile = profile_rows[0]
+    else:
+        profile = {
+            "display_name": "Reader",
+            "username": "@reader",
+            "following": 0,
+            "followers": 0,
+            "blocked": 0,
+            "chapters_read": 0,
+            "social_karma": 0,
+            "day_streak": 0,
+        }
+    # Do NOT inject global reading_lists into every profile (causes fake data).
+    # Client loads per-user lists via /api/reading-lists and /api/users/{id}/reading-lists.
     profile_payload = {
         **profile,
-        "reading_lists": [
-            {**row, "cover_path": _normalize_cover_path(row["cover_path"])}
-            for row in reading_lists
-        ],
+        "following": 0,
+        "followers": 0,
+        "blocked": 0,
+        "chapters_read": 0,
+        "social_karma": 0,
+        "day_streak": 0,
+        "reading_lists": [],
     }
 
     achievement_rows = fetch_all(
@@ -3140,3 +3151,261 @@ def admin_delete_achievement(
         raise HTTPException(status_code=404, detail="Achievement not found")
     bump_content_version()
     return {"ok": True}
+
+
+# ----- Public profile data (wired to real tables) -----
+
+@app.get("/api/users/{user_id}/stories")
+def list_user_stories(user_id: int):
+    """Public stories authored by user_id."""
+    rows = fetch_all(
+        """
+        SELECT id, user_id, title, author, description, genre, cover_path, accent_hex,
+               status_text, rating, primary_genre, secondary_genre, is_completed
+        FROM books
+        WHERE user_id=%s
+        ORDER BY id DESC
+        LIMIT 100
+        """,
+        (user_id,),
+    )
+    return {"items": [_serialize_book(row) for row in rows]}
+
+
+@app.get("/api/users/{user_id}/reading-lists")
+def list_user_reading_lists(user_id: int):
+    """Public reading lists for a user profile."""
+    rows = fetch_all(
+        """
+        SELECT id, name, story_count, cover_path, is_public
+        FROM reading_lists
+        WHERE user_id=%s AND (is_public IS NULL OR is_public=1 OR is_public=TRUE)
+        ORDER BY id DESC
+        LIMIT 50
+        """,
+        (user_id,),
+    )
+    items = []
+    for row in rows:
+        cover = _normalize_cover_path(_row_get(row, "cover_path") or "")
+        # collage covers from list items if available
+        covers = []
+        try:
+            lid = _row_get(row, "id")
+            if lid is not None:
+                item_rows = fetch_all(
+                    """
+                    SELECT b.cover_path FROM reading_list_items rli
+                    JOIN books b ON b.id = rli.book_id
+                    WHERE rli.reading_list_id=%s
+                    LIMIT 4
+                    """,
+                    (lid,),
+                )
+                for ir in item_rows:
+                    p = _normalize_cover_path(_row_get(ir, "cover_path") or "")
+                    if p:
+                        covers.append(p)
+        except Exception:
+            pass
+        items.append({
+            "id": _row_get(row, "id"),
+            "name": _row_get(row, "name") or "List",
+            "story_count": int(_row_get(row, "story_count") or 0),
+            "cover_path": cover,
+            "covers": covers,
+        })
+    return {"items": items}
+
+
+@app.get("/api/users/{user_id}/reviews")
+def list_user_reviews(user_id: int):
+    """Reviews written by this user."""
+    rows = fetch_all(
+        """
+        SELECT r.id, r.book_id, r.user_id, r.rating, r.comment, r.created_at,
+               b.title AS book_title, b.cover_path, b.author AS book_author,
+               u.display_name AS reviewer_name
+        FROM book_reviews r
+        LEFT JOIN books b ON b.id = r.book_id
+        LEFT JOIN app_users u ON u.id = r.user_id
+        WHERE r.user_id=%s
+        ORDER BY r.id DESC
+        LIMIT 100
+        """,
+        (user_id,),
+    )
+    items = []
+    for row in rows:
+        comment = _row_get(row, "comment") or ""
+        rating = int(_row_get(row, "rating") or 5)
+        items.append({
+            "id": _row_get(row, "id"),
+            "book_id": _row_get(row, "book_id"),
+            "book_title": _row_get(row, "book_title") or "Story",
+            "book_author": _row_get(row, "book_author") or "",
+            "cover_path": _normalize_cover_path(_row_get(row, "cover_path") or ""),
+            "rating": rating,
+            "comment": comment,
+            "title": comment.split("\n")[0][:80] if comment else "Review",
+            "plot": min(5, max(1, rating)),
+            "writing_style": min(5, max(1, rating)),
+            "grammar": min(5, max(1, max(1, rating - 1))),
+            "created_at": str(_row_get(row, "created_at") or ""),
+        })
+    return {"items": items}
+
+
+@app.get("/api/users/{user_id}/wall")
+def list_user_wall(user_id: int):
+    """Wall posts directed at or by this user (uses chat_messages if present)."""
+    try:
+        rows = fetch_all(
+            """
+            SELECT id, user_id, body, image_path, created_at
+            FROM chat_messages
+            WHERE user_id=%s OR target_user_id=%s
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (user_id, user_id),
+        )
+    except Exception:
+        try:
+            rows = fetch_all(
+                """
+                SELECT id, user_id, body, created_at
+                FROM chat_messages
+                WHERE user_id=%s
+                ORDER BY id DESC
+                LIMIT 50
+                """,
+                (user_id,),
+            )
+        except Exception:
+            rows = []
+    items = []
+    for row in rows:
+        uid = _row_get(row, "user_id")
+        uname = "User"
+        photo = ""
+        try:
+            urows = fetch_all(
+                "SELECT display_name, photo_url FROM app_users WHERE id=%s LIMIT 1",
+                (uid,),
+            )
+            if urows:
+                uname = _row_get(urows[0], "display_name") or uname
+                photo = _row_get(urows[0], "photo_url") or ""
+        except Exception:
+            pass
+        items.append({
+            "id": _row_get(row, "id"),
+            "user_id": uid,
+            "display_name": uname,
+            "photo_url": photo,
+            "body": _row_get(row, "body") or "",
+            "image_path": _row_get(row, "image_path") or "",
+            "created_at": str(_row_get(row, "created_at") or ""),
+            "likes": 0,
+        })
+    return {"items": items}
+
+
+@app.post("/api/users/{user_id}/wall")
+def post_user_wall(
+    user_id: int,
+    payload: dict[str, Any],
+    user: dict[str, Any] = Depends(require_user),
+):
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty post")
+    image_path = payload.get("image_path") or ""
+    try:
+        execute_write(
+            """
+            INSERT INTO chat_messages (user_id, target_user_id, body, image_path, created_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (user["user_id"], user_id, body, image_path),
+        )
+    except Exception:
+        execute_write(
+            """
+            INSERT INTO chat_messages (user_id, body, created_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            """,
+            (user["user_id"], body),
+        )
+    return {"ok": True}
+
+
+# ----- Admin: users list + ban / unban -----
+
+@app.get("/api/admin/users")
+def admin_list_users(_: dict[str, Any] = Depends(require_admin)):
+    try:
+        rows = fetch_all(
+            """
+            SELECT id, email, display_name, photo_url, provider, bio,
+                   COALESCE(is_banned, 0) AS is_banned,
+                   COALESCE(is_author, 0) AS is_author
+            FROM app_users
+            ORDER BY id DESC
+            LIMIT 500
+            """
+        )
+    except Exception:
+        rows = fetch_all(
+            "SELECT id, email, display_name, photo_url, provider, bio FROM app_users ORDER BY id DESC LIMIT 500"
+        )
+    items = []
+    for row in rows:
+        uid = _row_get(row, "id")
+        story_c = fetch_all("SELECT COUNT(*) AS c FROM books WHERE user_id=%s", (uid,))
+        fol_c = fetch_all("SELECT COUNT(*) AS c FROM author_follows WHERE author_id=%s", (uid,))
+        items.append({
+            "id": uid,
+            "email": _row_get(row, "email") or "",
+            "display_name": _row_get(row, "display_name") or "",
+            "photo_url": _row_get(row, "photo_url") or "",
+            "provider": _row_get(row, "provider") or "",
+            "bio": _row_get(row, "bio") or "",
+            "is_banned": bool(int(_row_get(row, "is_banned") or 0)),
+            "is_author": bool(int(_row_get(row, "is_author") or 0)) or int(story_c[0]["c"] if story_c else 0) > 0,
+            "story_count": int(story_c[0]["c"]) if story_c else 0,
+            "followers": int(fol_c[0]["c"]) if fol_c else 0,
+        })
+    return {"items": items}
+
+
+@app.post("/api/admin/users/{user_id}/ban")
+def admin_ban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    try:
+        execute_write("ALTER TABLE app_users ADD COLUMN is_banned INT NOT NULL DEFAULT 0", ())
+    except Exception:
+        pass
+    execute_write("UPDATE app_users SET is_banned=1 WHERE id=%s", (user_id,))
+    return {"ok": True, "is_banned": True}
+
+
+@app.post("/api/admin/users/{user_id}/unban")
+def admin_unban_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    try:
+        execute_write("UPDATE app_users SET is_banned=0 WHERE id=%s", (user_id,))
+    except Exception:
+        pass
+    return {"ok": True, "is_banned": False}
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(user_id: int, _: dict[str, Any] = Depends(require_admin)):
+    execute_write("DELETE FROM author_follows WHERE user_id=%s OR author_id=%s", (user_id, user_id))
+    try:
+        execute_write("DELETE FROM book_likes WHERE user_id=%s", (user_id,))
+    except Exception:
+        pass
+    execute_write("DELETE FROM app_users WHERE id=%s", (user_id,))
+    return {"ok": True}
+

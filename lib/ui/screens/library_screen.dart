@@ -43,8 +43,9 @@ class _LibraryScreenState extends State<LibraryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _entries = List.from(widget.data.libraryEntries);
-    _readingLists = List.from(widget.data.profile.readingLists);
+    // Load only from API — do not seed fake bootstrap lists/entries
+    _entries = [];
+    _readingLists = [];
     _loadEntries();
     _loadLists();
   }

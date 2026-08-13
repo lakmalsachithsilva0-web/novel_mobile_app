@@ -7,6 +7,10 @@ import {
   createCategory,
   createMenuItem,
   createNotification,
+  listAdminUsers,
+  banUser,
+  unbanUser,
+  deleteAdminUser,
   createReadingList,
   deleteAchievement,
   deleteBook,
@@ -148,6 +152,7 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [books, setBooks] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [users, setUsers] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
   const [writeScreen, setWriteScreen] = useState({});
   const [profile, setProfile] = useState({});
@@ -200,6 +205,13 @@ export default function App() {
       setSupportRequests(asArray(bootstrap.support_requests || bootstrap.support || []));
       setContentVersion(typeof version === "string" ? version : version?.version || "");
       setStoryImages(asArray(images.items || images));
+      try {
+        const u = await listAdminUsers();
+        setUsers(asArray(u.items || u));
+      } catch (ue) {
+        console.warn("users load", ue);
+        setUsers([]);
+      }
     } catch (e) {
       if (String(e.message || e).includes("401") || String(e.message || e).includes("403")) {
         clearAdminToken();
@@ -450,7 +462,13 @@ export default function App() {
           )}
           {page === "authors" && <AuthorsPage authors={authors} search={search} />}
           {page === "users" && (
-            <UsersPage profile={profile} supportRequests={supportRequests} onUpdateSupport={async (id, p) => {
+            <UsersPage
+              users={users}
+              supportRequests={supportRequests}
+              onBan={async (id) => { await banUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
+              onUnban={async (id) => { await unbanUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
+              onDeleteUser={async (id) => { if (!confirm('Delete user?')) return; await deleteAdminUser(id); const u = await listAdminUsers(); setUsers(asArray(u.items || u)); }}
+              onUpdateSupport={async (id, p) => {
               await updateSupportRequest(id, p);
               toast("Updated");
               loadAll();
@@ -870,60 +888,80 @@ function AuthorsPage({ authors, search }) {
   );
 }
 
-function UsersPage({ profile, supportRequests }) {
+function UsersPage({ users = [], supportRequests = [], onBan, onUnban, onDeleteUser }) {
+  const list = Array.isArray(users) ? users : [];
   return (
     <div className="layout-with-aside">
       <div className="panel">
         <div className="panel-header">
-          <h3>Users / Support contacts</h3>
+          <h3>Users & Authors</h3>
+          <span className="muted">{list.length} accounts</span>
         </div>
         <div className="table-wrap">
           <table className="data">
             <thead>
               <tr>
+                <th>ID</th>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Issue</th>
+                <th>Stories</th>
+                <th>Followers</th>
+                <th>Role</th>
                 <th>Status</th>
-                <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {supportRequests.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.first_name || "—"}</td>
-                  <td>{r.email}</td>
-                  <td>{r.issue || r.subject || "—"}</td>
-                  <td><span className={`badge ${statusBadge(r.status)}`}>{r.status || "open"}</span></td>
-                  <td>{r.created_at || "—"}</td>
-                </tr>
-              ))}
-              {supportRequests.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="empty">
-                    No support requests yet. App default profile: {profile.display_name || "—"} (@{profile.username || "—"})
+              {list.length === 0 && (
+                <tr><td colSpan={8} className="muted">No users loaded — ensure backend /api/admin/users is available.</td></tr>
+              )}
+              {list.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.id}</td>
+                  <td>{u.display_name || "—"}</td>
+                  <td>{u.email || "—"}</td>
+                  <td>{u.story_count ?? 0}</td>
+                  <td>{u.followers ?? 0}</td>
+                  <td>{u.is_author ? "Author" : "Reader"}</td>
+                  <td>{u.is_banned ? statusBadge("banned") : statusBadge("active")}</td>
+                  <td className="actions">
+                    {u.is_banned ? (
+                      <button className="btn ghost" onClick={() => onUnban?.(u.id)}>Unban</button>
+                    ) : (
+                      <button className="btn danger" onClick={() => onBan?.(u.id)}>Ban</button>
+                    )}
+                    <button className="btn ghost" onClick={() => onDeleteUser?.(u.id)}>Delete</button>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </div>
       <div className="panel">
-        <div className="panel-header"><h3>Default profile (DB)</h3></div>
-        <p style={{ fontSize: ".85rem", color: "var(--text-muted)" }}>
-          Following: <strong>{profile.following ?? 0}</strong>
-          <br />
-          Followers: <strong>{profile.followers ?? 0}</strong>
-          <br />
-          Chapters read: <strong>{profile.chapters_read ?? 0}</strong>
-          <br />
-          Karma: <strong>{profile.social_karma ?? 0}</strong>
-        </p>
+        <div className="panel-header"><h3>Support requests</h3></div>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Issue</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {(supportRequests || []).map((r) => (
+                <tr key={r.id}>
+                  <td>{r.name || r.display_name}</td>
+                  <td>{r.email}</td>
+                  <td>{r.subject || r.message}</td>
+                  <td>{statusBadge(r.status || "open")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
+
 
 function ReportsPage({ books, authors }) {
   const genreData = useMemo(() => {

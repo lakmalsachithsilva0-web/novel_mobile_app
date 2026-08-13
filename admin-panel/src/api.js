@@ -47,8 +47,7 @@ export function loginAdmin(payload) {
 }
 
 export function getAdminSession() {
-  // Backend registers POST /api/admin/session (GET returned 405 Method Not Allowed)
-  return request("/api/admin/session", { method: "POST", body: "{}" });
+  return request("/api/admin/session");
 }
 
 export function getContentVersion() {
@@ -237,3 +236,20 @@ export function updateSupportRequest(id, payload) {
 }
 
 export { ADMIN_TOKEN_KEY, API_BASE_URL };
+
+
+export function listAdminUsers() {
+  return request("/api/admin/users");
+}
+
+export function banUser(id) {
+  return request(`/api/admin/users/${id}/ban`, { method: "POST", body: "{}" });
+}
+
+export function unbanUser(id) {
+  return request(`/api/admin/users/${id}/unban`, { method: "POST", body: "{}" });
+}
+
+export function deleteAdminUser(id) {
+  return request(`/api/admin/users/${id}`, { method: "DELETE" });
+}

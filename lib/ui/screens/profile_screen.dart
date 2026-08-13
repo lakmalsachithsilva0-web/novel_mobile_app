@@ -67,10 +67,25 @@ class _ProfileScreenState extends State<ProfileScreen>
       final me = await widget.apiService.fetchMe();
       final meId = _asInt(me['id'] ?? me['user_id']);
       final viewId = widget.viewingUserId;
-      _isOwnProfile = viewId == null || viewId == meId;
+      _isOwnProfile = viewId == null || (meId != 0 && viewId == meId);
+
+      final int targetId = _isOwnProfile
+          ? (meId != 0 ? meId : (widget.profile.id ?? 0))
+          : (viewId ?? 0);
 
       if (_isOwnProfile) {
-        _userProfile = me;
+        _userProfile = me.isNotEmpty ? me : {
+          'id': widget.profile.id,
+          'display_name': widget.profile.displayName,
+          'username': widget.profile.username,
+          'following': widget.profile.following,
+          'followers': widget.profile.followers,
+          'chapters_read': widget.profile.chaptersRead,
+          'social_karma': widget.profile.socialKarma,
+          'day_streak': widget.profile.dayStreak,
+          'photo_url': widget.profile.photoUrl,
+          'cover_url': widget.profile.coverUrl,
+        };
       } else {
         _userProfile = await widget.apiService.fetchProfile(viewId!);
         try {
@@ -80,21 +95,44 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
       }
 
-      final results = await Future.wait([
-        widget.apiService.fetchWriterStories().catchError((_) => <Map<String, dynamic>>[]),
-        widget.apiService.fetchChatMessages().catchError((_) => <Map<String, dynamic>>[]),
-        widget.apiService.fetchNotifications().catchError((_) => <Map<String, dynamic>>[]),
-        widget.apiService.fetchMyReviews().catchError((_) => <Map<String, dynamic>>[]),
-        widget.apiService.fetchReadingLists().catchError((_) => <Map<String, dynamic>>[]),
-      ]);
+      // Always load from backend — never use bootstrap fake lists/stories
+      List stories = const [];
+      List wall = const [];
+      List activity = const [];
+      List reviews = const [];
+      List lists = const [];
+
+      if (targetId > 0) {
+        final results = await Future.wait([
+          (_isOwnProfile
+                  ? widget.apiService.fetchWriterStories()
+                  : widget.apiService.fetchUserStories(targetId))
+              .catchError((_) => <Map<String, dynamic>>[]),
+          widget.apiService.fetchUserWall(targetId).catchError((_) => <Map<String, dynamic>>[]),
+          widget.apiService.fetchNotifications().catchError((_) => <Map<String, dynamic>>[]),
+          (_isOwnProfile
+                  ? widget.apiService.fetchMyReviews()
+                  : widget.apiService.fetchUserReviews(targetId))
+              .catchError((_) => <Map<String, dynamic>>[]),
+          (_isOwnProfile
+                  ? widget.apiService.fetchReadingLists()
+                  : widget.apiService.fetchUserReadingLists(targetId))
+              .catchError((_) => <Map<String, dynamic>>[]),
+        ]);
+        stories = List<Map<String, dynamic>>.from(results[0] as List);
+        wall = List<Map<String, dynamic>>.from(results[1] as List);
+        activity = List<Map<String, dynamic>>.from(results[2] as List);
+        reviews = List<Map<String, dynamic>>.from(results[3] as List);
+        lists = List<Map<String, dynamic>>.from(results[4] as List);
+      }
 
       if (!mounted) return;
       setState(() {
-        _stories = List<Map<String, dynamic>>.from(results[0] as List);
-        _wall = List<Map<String, dynamic>>.from(results[1] as List);
-        _activity = List<Map<String, dynamic>>.from(results[2] as List);
-        _reviews = List<Map<String, dynamic>>.from(results[3] as List);
-        _readingLists = List<Map<String, dynamic>>.from(results[4] as List);
+        _stories = stories.cast<Map<String, dynamic>>();
+        _wall = wall.cast<Map<String, dynamic>>();
+        _activity = activity.cast<Map<String, dynamic>>();
+        _reviews = reviews.cast<Map<String, dynamic>>();
+        _readingLists = lists.cast<Map<String, dynamic>>();
         _loadingProfile = false;
       });
     } catch (e) {
@@ -1020,34 +1058,38 @@ class _ProfileScreenState extends State<ProfileScreen>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        // Composer
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: cardBg,
-              backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-              child: _avatarUrl.isEmpty
-                  ? Text(_displayName.isNotEmpty ? _displayName[0] : '?', style: const TextStyle(color: muted))
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Text(
-                  'Write something to $_username',
-                  style: const TextStyle(color: muted, fontSize: 13),
+        // Composer — posts to backend wall
+        InkWell(
+          onTap: _composeWallPost,
+          borderRadius: BorderRadius.circular(24),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: cardBg,
+                backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                child: _avatarUrl.isEmpty
+                    ? Text(_displayName.isNotEmpty ? _displayName[0] : '?', style: const TextStyle(color: muted))
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Text(
+                    'Write something to $_username',
+                    style: const TextStyle(color: muted, fontSize: 13),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.image_outlined, color: muted),
-          ],
+              const SizedBox(width: 8),
+              const Icon(Icons.image_outlined, color: muted),
+            ],
+          ),
         ),
         const SizedBox(height: 16),
         if (_wall.isEmpty)
@@ -1169,7 +1211,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final writing = _asInt(r['writing_score'] ?? r['writing_style'] ?? stars);
         final grammar = _asInt(r['grammar_score'] ?? r['grammar'] ?? stars);
         final headline = _s(r['headline'] ?? r['title'] ?? '');
-        final body = _s(r['body'] ?? r['review'] ?? r['text'] ?? '');
+        final body = _s(r['body'] ?? r['comment'] ?? r['review'] ?? r['text'] ?? '');
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
