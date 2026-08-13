@@ -63,7 +63,10 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
   }
 
   Future<void> _resolveAuthorName() async {
+<<<<<<< HEAD
     // Priority: parent session name → /api/me → prefs → existing story author
+=======
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
     String name = (widget.authorDisplayName ?? '').trim();
     if (name.isEmpty) {
       try {
@@ -115,7 +118,10 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
     if (name.startsWith('#')) name = name.substring(1);
     if (name.isEmpty) return;
 
+<<<<<<< HEAD
     // Only allow tags that already exist in admin DB
+=======
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
     final match = _availableTags.firstWhere(
       (t) => t.toLowerCase() == name.toLowerCase(),
       orElse: () => '',
@@ -158,8 +164,16 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
     if (picked == null) return;
     try {
       final bytes = await picked.readAsBytes();
+<<<<<<< HEAD
       final result = await widget.apiService.uploadWriterImage(bytes, picked.name);
       final path = (result['path'] ?? result['cover_path'] ?? result['url'] ?? '').toString();
+=======
+      final result =
+          await widget.apiService.uploadWriterImage(bytes, picked.name);
+      final path =
+          (result['path'] ?? result['cover_path'] ?? result['url'] ?? '')
+              .toString();
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
       if (!mounted) return;
       if (path.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -209,7 +223,12 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
         'title': title,
         'description': summary,
         'author': author.isEmpty ? 'Author' : author,
+<<<<<<< HEAD
         'genre': genre,
+=======
+        'genre': genre.isEmpty ? 'Fiction' : genre,
+        'cover_path': _coverPath,
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
         'tags': List<String>.from(_selectedTags.take(3)),
         if (_coverPath.isNotEmpty) 'cover_path': _coverPath,
       };
@@ -225,7 +244,11 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
+<<<<<<< HEAD
         SnackBar(content: Text('Save failed: $e')),
+=======
+        SnackBar(content: Text('Failed to save: $e')),
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -235,7 +258,13 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
   List<String> _tagSuggestions(String query) {
     final q = query.trim().toLowerCase().replaceFirst('#', '');
     return _availableTags
+<<<<<<< HEAD
         .where((t) => !_selectedTags.any((s) => s.toLowerCase() == t.toLowerCase()))
+=======
+        .where(
+          (t) => !_selectedTags.any((s) => s.toLowerCase() == t.toLowerCase()),
+        )
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
         .where((t) => q.isEmpty || t.toLowerCase().contains(q))
         .take(12)
         .toList();
@@ -256,14 +285,24 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
+<<<<<<< HEAD
                 : const Text('Save', style: TextStyle(fontWeight: FontWeight.w700)),
+=======
+                : const Text(
+                    'Save',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
+<<<<<<< HEAD
           // Cover
+=======
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
           GestureDetector(
             onTap: _pickCover,
             child: Container(
@@ -401,7 +440,12 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
                 return _tagSuggestions(value.text);
               },
               onSelected: _addTag,
+<<<<<<< HEAD
               fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+=======
+              fieldViewBuilder:
+                  (context, controller, focusNode, onFieldSubmitted) {
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
                 return TextField(
                   controller: controller,
                   focusNode: focusNode,
@@ -429,7 +473,12 @@ class _CreateStoryScreenState extends State<CreateStoryScreen> {
                     elevation: 4,
                     borderRadius: BorderRadius.circular(10),
                     child: ConstrainedBox(
+<<<<<<< HEAD
                       constraints: const BoxConstraints(maxHeight: 200, maxWidth: 320),
+=======
+                      constraints:
+                          const BoxConstraints(maxHeight: 200, maxWidth: 320),
+>>>>>>> f2550211c5b76b7b09bd47a9dd535f5e0cac6454
                       child: ListView.builder(
                         padding: EdgeInsets.zero,
                         shrinkWrap: true,
