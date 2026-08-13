@@ -1132,7 +1132,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             const SizedBox(height: 12),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: teal,
+                backgroundColor: brand,
                 foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.pop(ctx, true),
