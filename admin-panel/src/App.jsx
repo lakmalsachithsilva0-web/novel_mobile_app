@@ -307,7 +307,7 @@ export default function App() {
 
   return (
     <div className="admin-shell">
-      <header className="hero">
+      <header className="topbar">
         <div>
           <p className="eyebrow">Inkitt-style CMS</p>
           <h1>Admin Control Panel</h1>
@@ -319,16 +319,16 @@ export default function App() {
           <div className="endpoint">API: {API_BASE_URL}</div>
           <div className="endpoint">Live sync key: {contentVersion || "waiting..."}</div>
           <div className="endpoint">Signed in as: {session?.username || "admin"}</div>
-          <button type="button" className="ghost-button" onClick={() => loadData()}>
+          <button type="button" className="ghost" onClick={() => loadData()}>
             Refresh
           </button>
-          <button type="button" className="ghost-button" onClick={handleLogout}>
+          <button type="button" className="ghost" onClick={handleLogout}>
             Log out
           </button>
         </div>
       </header>
 
-      <section className="stats-grid">
+      <section className="grid-stats">
         <article className="stat-card"><p>Categories</p><h3>{stats.categories}</h3></article>
         <article className="stat-card"><p>Stories</p><h3>{stats.books}</h3></article>
         <article className="stat-card"><p>Notifications</p><h3>{stats.notifications}</h3></article>
@@ -378,7 +378,7 @@ export default function App() {
                 <input ref={uploadInputRef} hidden type="file" accept="image/*" onChange={handleImageUpload} />
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="ghost"
                   onClick={() => uploadInputRef.current?.click()}
                   disabled={uploadingImage}
                 >
@@ -670,18 +670,16 @@ export default function App() {
 function LoginScreen({ apiBaseUrl, error, onLogin }) {
   const [form, setForm] = useState({
     username: "admin_Supun",
-    password: "Ux3@f=7x2",
+    password: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
   return (
-    <div className="login-shell">
-      <div className="login-panel">
-        <p className="eyebrow">Admin access</p>
-        <h1>Sign in to manage Inkitt</h1>
-        <p className="subtitle">The admin panel uses a signed token and talks directly to your FastAPI backend.</p>
+    <div className="login-page">
+      <div className="login-card">
+        <h1>Novel Admin</h1>
+        <p>Dark control center for stories and app content. Credentials come from backend <code>.env</code>.</p>
         <form
-          className="form-grid"
           onSubmit={async (event) => {
             event.preventDefault();
             setSubmitting(true);
@@ -692,12 +690,17 @@ function LoginScreen({ apiBaseUrl, error, onLogin }) {
             }
           }}
         >
-          <input value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username" required />
-          <input type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" required />
-          <button type="submit" disabled={submitting}>{submitting ? "Signing in..." : "Sign in"}</button>
+          <label>Username</label>
+          <input value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} placeholder="ADMIN_USERNAME" required />
+          <label>Password</label>
+          <input type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="ADMIN_PASSWORD" required />
+          <button type="submit" className="primary" disabled={submitting}>{submitting ? "Signing in..." : "Sign in"}</button>
         </form>
         {error ? <div className="error-banner">{error}</div> : null}
-        <div className="endpoint">API: {apiBaseUrl}</div>
+        <div className="login-hint">
+          Set <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code> in <code>backend/.env</code>.
+          Default username is often <code>admin_Supun</code>. API: {apiBaseUrl}
+        </div>
       </div>
     </div>
   );

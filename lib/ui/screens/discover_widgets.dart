@@ -223,7 +223,7 @@ class _DynamicStoryRailState extends State<_DynamicStoryRail> {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 158,
+          height: 180,
           child: PageView.builder(
             controller: _pageController,
             padEnds: true,
@@ -231,33 +231,49 @@ class _DynamicStoryRailState extends State<_DynamicStoryRail> {
             onPageChanged: (index) => setState(() => _activeIndex = index),
             itemBuilder: (context, index) {
               final item = widget.section.books[index];
-              return Padding(
-                padding: const EdgeInsets.only(right: 10, left: 8),
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => StoryDetailScreen(
-                          apiService: widget.apiService,
-                          book: BookDetailModel(
-                            id: item.id,
-                            title: item.title,
-                            author: item.author,
-                            description: item.description,
-                            statusText: item.statusText,
-                            rating: item.rating,
-                            genre: item.primaryGenre,
-                            cta: item.cta,
-                            coverPath: item.coverPath,
+              final isActive = index == _activeIndex;
+              return AnimatedScale(
+                scale: isActive ? 1.12 : 0.92,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  opacity: isActive ? 1.0 : 0.55,
+                  duration: const Duration(milliseconds: 220),
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 10, left: 8),
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => StoryDetailScreen(
+                              apiService: widget.apiService,
+                              book: BookDetailModel(
+                                id: item.id,
+                                title: item.title,
+                                author: item.author,
+                                description: item.description,
+                                statusText: item.statusText,
+                                rating: item.rating,
+                                genre: item.primaryGenre,
+                                cta: item.cta,
+                                coverPath: item.coverPath,
+                              ),
+                            ),
                           ),
+                        );
+                      },
+                      child: ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(
+                          sigmaX: isActive ? 0 : 2.2,
+                          sigmaY: isActive ? 0 : 2.2,
+                        ),
+                        child: _StoryCard(
+                          book: item,
+                          width: 96,
+                          apiService: widget.apiService,
                         ),
                       ),
-                    );
-                  },
-                  child: _StoryCard(
-                    book: item,
-                    width: 96,
-                    apiService: widget.apiService,
+                    ),
                   ),
                 ),
               );

@@ -631,31 +631,63 @@ def _fetch_google_json(endpoint: str, query: dict[str, str]) -> dict[str, Any]:
 
 
 def _verify_google_payload(payload: GoogleAuthRequest) -> dict[str, Any]:
-    if payload.id_token:
-        token_info = _fetch_google_json(
-            "https://oauth2.googleapis.com/tokeninfo",
-            {"id_token": payload.id_token},
-        )
-        LOGGER.debug("Google tokeninfo (id_token): %s", token_info)
-        audience = (
-            token_info.get("aud")
-            or token_info.get("audience")
-            or token_info.get("issued_to")
-            or ""
-        )
-        if GOOGLE_CLIENT_IDS and audience not in GOOGLE_CLIENT_IDS:
+    """Verify Google id_token or access_token.
+
+    If GOOGLE_CLIENT_IDS is empty, audience is not enforced (dev-friendly).
+    Set GOOGLE_CLIENT_ID or GOOGLE_CLIENT_IDS in production to lock audiences.
+    """
+    def _check_audience(audience: str, token_info: dict[str, Any]) -> None:
+        if not GOOGLE_CLIENT_IDS:
+            LOGGER.warning(
+                "GOOGLE_CLIENT_ID(s) not set — accepting Google token without audience check (dev mode). "
+                "Set GOOGLE_CLIENT_IDS in backend .env for production."
+            )
+            return
+        if audience and audience not in GOOGLE_CLIENT_IDS:
             LOGGER.warning(
                 "Google audience mismatch: aud=%s allowed=%s tokeninfo=%s",
                 audience,
                 GOOGLE_CLIENT_IDS,
                 token_info,
             )
-            raise HTTPException(status_code=401, detail="Google audience mismatch")
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Google audience mismatch. Add this client ID to GOOGLE_CLIENT_IDS on the backend: "
+                    f"{audience or '(empty)'}"
+                ),
+            )
+
+    if payload.id_token:
+        try:
+            token_info = _fetch_google_json(
+                "https://oauth2.googleapis.com/tokeninfo",
+                {"id_token": payload.id_token},
+            )
+        except Exception as exc:
+            LOGGER.exception("Google id_token verification failed")
+            raise HTTPException(
+                status_code=401,
+                detail=f"Google id_token verification failed: {exc}",
+            ) from exc
+        LOGGER.debug("Google tokeninfo (id_token): %s", token_info)
+        if token_info.get("error"):
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid Google id_token: {token_info.get('error_description') or token_info.get('error')}",
+            )
+        audience = (
+            token_info.get("aud")
+            or token_info.get("audience")
+            or token_info.get("issued_to")
+            or ""
+        )
+        _check_audience(str(audience), token_info)
 
         email = token_info.get("email", "")
         subject = token_info.get("sub", "")
         if not email or not subject:
-            raise HTTPException(status_code=401, detail="Invalid Google token")
+            raise HTTPException(status_code=401, detail="Invalid Google token (missing email/sub)")
 
         return {
             "email": email,
@@ -665,10 +697,17 @@ def _verify_google_payload(payload: GoogleAuthRequest) -> dict[str, Any]:
         }
 
     if payload.access_token:
-        token_info = _fetch_google_json(
-            "https://oauth2.googleapis.com/tokeninfo",
-            {"access_token": payload.access_token},
-        )
+        try:
+            token_info = _fetch_google_json(
+                "https://oauth2.googleapis.com/tokeninfo",
+                {"access_token": payload.access_token},
+            )
+        except Exception as exc:
+            LOGGER.exception("Google access_token verification failed")
+            raise HTTPException(
+                status_code=401,
+                detail=f"Google access_token verification failed: {exc}",
+            ) from exc
         LOGGER.debug("Google tokeninfo (access_token): %s", token_info)
         audience = (
             token_info.get("aud")
@@ -676,24 +715,24 @@ def _verify_google_payload(payload: GoogleAuthRequest) -> dict[str, Any]:
             or token_info.get("issued_to")
             or ""
         )
-        if GOOGLE_CLIENT_IDS and audience not in GOOGLE_CLIENT_IDS:
-            LOGGER.warning(
-                "Google audience mismatch: aud=%s allowed=%s tokeninfo=%s",
-                audience,
-                GOOGLE_CLIENT_IDS,
-                token_info,
-            )
-            raise HTTPException(status_code=401, detail="Google audience mismatch")
+        _check_audience(str(audience), token_info)
 
-        user_info = _fetch_google_json(
-            "https://www.googleapis.com/oauth2/v2/userinfo",
-            {"access_token": payload.access_token},
-        )
+        try:
+            user_info = _fetch_google_json(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                {"access_token": payload.access_token},
+            )
+        except Exception as exc:
+            LOGGER.exception("Google userinfo failed")
+            raise HTTPException(
+                status_code=401,
+                detail=f"Google userinfo failed: {exc}",
+            ) from exc
         LOGGER.debug("Google userinfo: %s", user_info)
         email = user_info.get("email", "")
-        subject = user_info.get("id", "")
+        subject = user_info.get("id", "") or token_info.get("sub", "")
         if not email or not subject:
-            raise HTTPException(status_code=401, detail="Invalid Google token")
+            raise HTTPException(status_code=401, detail="Invalid Google token (missing email/id)")
 
         return {
             "email": email,
@@ -702,7 +741,10 @@ def _verify_google_payload(payload: GoogleAuthRequest) -> dict[str, Any]:
             "photo_url": user_info.get("picture") or "",
         }
 
-    raise HTTPException(status_code=400, detail="Missing Google token")
+    raise HTTPException(
+        status_code=400,
+        detail="Missing Google token. App must send id_token or access_token from Google Sign-In.",
+    )
 
 
 def _parse_optional_datetime(value: str | None) -> datetime | None:
@@ -1199,34 +1241,9 @@ def bootstrap():
             "tags": _story_tags_for_book(featured_raw["id"]),
         }
 
-    library_entries = fetch_all(
-        """
-        SELECT le.id, le.reading_status, le.updated_text, le.chapters, le.primary_genre,
-               le.secondary_genre, b.id AS book_id, b.title, b.author, b.cover_path, b.accent_hex
-        FROM library_entries le
-        JOIN books b ON b.id = le.book_id
-        ORDER BY le.sort_order, le.id
-        """
-    )
-
-    library_payload = [
-        {
-            "id": row["id"],
-            "book": {
-                "id": row["book_id"],
-                "title": row["title"],
-                "author": row["author"],
-                "cover_path": _normalize_cover_path(row["cover_path"]),
-                "accent_hex": row["accent_hex"],
-            },
-            "reading_status": row["reading_status"],
-            "updated_text": row["updated_text"],
-            "chapters": row["chapters"],
-            "primary_genre": row["primary_genre"],
-            "secondary_genre": row["secondary_genre"],
-        }
-        for row in library_entries
-    ]
+    # Library entries are user-specific and loaded via GET /api/library after auth.
+    # Bootstrap stays public (read-only discover content) so unauthenticated users can browse.
+    library_payload: list[dict[str, Any]] = []
 
     _ensure_default_write_screen()
     _ensure_default_profile()

@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 
 class LoginScreen extends StatelessWidget {
-  const LoginScreen({super.key, required this.onContinue});
+  const LoginScreen({
+    super.key,
+    required this.onContinue,
+    this.onSkipAsReader,
+  });
 
   final Future<void> Function(String method, {String? email}) onContinue;
+
+  /// Pure read-only browse (no account at all). Discover only.
+  final VoidCallback? onSkipAsReader;
 
   Future<void> _openEmailPrompt(BuildContext context) async {
     final controller = TextEditingController();
@@ -121,10 +128,26 @@ class LoginScreen extends StatelessWidget {
                         const SizedBox(height: 12),
                         _LoginButton(
                           icon: Icons.person_outline,
-                          label: 'Continue without sign in',
+                          label: 'Continue as Guest',
                           onPressed: () => onContinue('guest'),
                         ),
+                        if (onSkipAsReader != null) ...[
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: onSkipAsReader,
+                            child: const Text(
+                              'Browse stories only (read-only, no account)',
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 28),
+                        Text(
+                          'Without an account you can read stories on Discover. '
+                          'Sign in to save progress, library, and write.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 12),
                         Text(
                           'By continuing you agree to our Terms of Service and Privacy Policy.',
                           textAlign: TextAlign.center,
